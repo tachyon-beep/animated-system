@@ -146,3 +146,8 @@ cython_debug/
 # Project specific
 *.pys.json
 *.pys.yaml
+
+# Temporary test files
+test_*.pys
+test_*.py
+debug_*.py
