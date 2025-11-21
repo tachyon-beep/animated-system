@@ -25,6 +25,22 @@ def main() -> int:
     lint_parser.add_argument("--strict", action="store_true", help="Treat warnings as errors")
     lint_parser.add_argument("--json", action="store_true", help="Output diagnostics as JSON")
 
+    # Format command
+    fmt_parser = subparsers.add_parser("fmt", help="Auto-format PyShorthand files")
+    fmt_parser.add_argument("input", help="Input .pys file or directory")
+    fmt_parser.add_argument("-w", "--write", action="store_true", help="Write changes in-place")
+    fmt_parser.add_argument("--check", action="store_true", help="Check if files need formatting")
+    fmt_parser.add_argument("--diff", action="store_true", help="Show diff of formatting changes")
+
+    # Viz command
+    viz_parser = subparsers.add_parser("viz", help="Generate visualizations")
+    viz_parser.add_argument("input", help="Input .pys file")
+    viz_parser.add_argument("-o", "--output", help="Output file")
+    viz_parser.add_argument("-t", "--type", choices=["flowchart", "classDiagram", "graph"],
+                           default="flowchart", help="Diagram type")
+    viz_parser.add_argument("-d", "--direction", choices=["TB", "LR", "RL", "BT"],
+                           default="TB", help="Diagram direction")
+
     # Version command
     version_parser = subparsers.add_parser("version", help="Show version information")
 
@@ -42,6 +58,14 @@ def main() -> int:
         from pyshort.cli.lint import lint_command
 
         return lint_command(args)
+    elif args.command == "fmt":
+        from pyshort.cli.format import format_command
+
+        return format_command(args)
+    elif args.command == "viz":
+        from pyshort.cli.viz import viz_command
+
+        return viz_command(args)
     elif args.command == "version":
         from pyshort import __version__
 

@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from typing import Iterator, List
 
 from pyshort.core.ast_nodes import Diagnostic, DiagnosticSeverity, PyShortAST, Statement
+from pyshort.core.enhanced_errors import suggest_did_you_mean
 from pyshort.core.symbols import (
     VALID_LAYERS,
     VALID_LOCATIONS,
@@ -64,30 +65,39 @@ class ValidMetadataValuesRule(Rule):
     def check(self, ast: PyShortAST) -> Iterator[Diagnostic]:
         """Check metadata values."""
         if ast.metadata.role and ast.metadata.role not in VALID_ROLES:
+            suggestion = suggest_did_you_mean(ast.metadata.role, "role")
+            if not suggestion:
+                suggestion = f"Use one of: {', '.join(VALID_ROLES)}"
             yield Diagnostic(
                 severity=DiagnosticSeverity.ERROR,
                 line=1,
                 column=1,
-                message=f"Invalid role: {ast.metadata.role}. Must be one of: {', '.join(VALID_ROLES)}",
-                suggestion=f"Use one of: {', '.join(VALID_ROLES)}",
+                message=f"Invalid role: '{ast.metadata.role}'",
+                suggestion=suggestion,
             )
 
         if ast.metadata.layer and ast.metadata.layer not in VALID_LAYERS:
+            suggestion = suggest_did_you_mean(ast.metadata.layer, "layer")
+            if not suggestion:
+                suggestion = f"Use one of: {', '.join(VALID_LAYERS)}"
             yield Diagnostic(
                 severity=DiagnosticSeverity.ERROR,
                 line=1,
                 column=1,
-                message=f"Invalid layer: {ast.metadata.layer}. Must be one of: {', '.join(VALID_LAYERS)}",
-                suggestion=f"Use one of: {', '.join(VALID_LAYERS)}",
+                message=f"Invalid layer: '{ast.metadata.layer}'",
+                suggestion=suggestion,
             )
 
         if ast.metadata.risk and ast.metadata.risk not in VALID_RISK_LEVELS:
+            suggestion = suggest_did_you_mean(ast.metadata.risk, "risk")
+            if not suggestion:
+                suggestion = f"Use one of: {', '.join(VALID_RISK_LEVELS)}"
             yield Diagnostic(
                 severity=DiagnosticSeverity.ERROR,
                 line=1,
                 column=1,
-                message=f"Invalid risk level: {ast.metadata.risk}. Must be one of: {', '.join(VALID_RISK_LEVELS)}",
-                suggestion=f"Use one of: {', '.join(VALID_RISK_LEVELS)}",
+                message=f"Invalid risk level: '{ast.metadata.risk}'",
+                suggestion=suggestion,
             )
 
 
