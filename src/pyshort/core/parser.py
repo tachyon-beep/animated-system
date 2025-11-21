@@ -1,0 +1,727 @@
+"""PyShorthand parser implementation.
+
+This module provides a recursive descent parser for PyShorthand notation,
+building an AST from tokenized input.
+"""
+
+import re
+from typing import List, Optional, Tuple
+
+from pyshort.core.ast_nodes import (
+    BinaryOp,
+    Class,
+    Data,
+    Diagnostic,
+    DiagnosticSeverity,
+    Expression,
+    Function,
+    FunctionCall,
+    Identifier,
+    Interface,
+    Literal,
+    Metadata,
+    Module,
+    Parameter,
+    PyShortAST,
+    Reference,
+    Statement,
+    StateVar,
+    Tag,
+    TensorOp,
+    TypeSpec,
+)
+from pyshort.core.symbols import ENTITY_PREFIXES, normalize_operator
+from pyshort.core.tokenizer import Token, TokenType, Tokenizer
+
+
+class ParseError(Exception):
+    """Parse error with location information."""
+
+    def __init__(self, message: str, token: Token) -> None:
+        super().__init__(message)
+        self.message = message
+        self.token = token
+
+
+class Parser:
+    """Recursive descent parser for PyShorthand."""
+
+    def __init__(self, tokens: List[Token]) -> None:
+        """Initialize parser.
+
+        Args:
+            tokens: List of tokens from tokenizer
+        """
+        self.tokens = tokens
+        self.pos = 0
+        self.current_token = self.tokens[0] if tokens else Token(TokenType.EOF, "", 0, 0)
+
+    def advance(self) -> Token:
+        """Advance to next token and return previous."""
+        prev = self.current_token
+        if self.pos < len(self.tokens) - 1:
+            self.pos += 1
+            self.current_token = self.tokens[self.pos]
+        return prev
+
+    def peek(self, offset: int = 1) -> Optional[Token]:
+        """Peek at token at offset from current position."""
+        pos = self.pos + offset
+        if pos < len(self.tokens):
+            return self.tokens[pos]
+        return None
+
+    def expect(self, token_type: TokenType) -> Token:
+        """Expect a specific token type and advance.
+
+        Args:
+            token_type: Expected token type
+
+        Returns:
+            The matched token
+
+        Raises:
+            ParseError: If token doesn't match
+        """
+        if self.current_token.type != token_type:
+            raise ParseError(
+                f"Expected {token_type.name}, got {self.current_token.type.name}",
+                self.current_token,
+            )
+        return self.advance()
+
+    def skip_newlines(self) -> None:
+        """Skip any newline tokens."""
+        while self.current_token.type == TokenType.NEWLINE:
+            self.advance()
+
+    def skip_comments(self) -> None:
+        """Skip any comment tokens."""
+        while self.current_token.type == TokenType.COMMENT:
+            self.advance()
+
+    def skip_whitespace(self) -> None:
+        """Skip newlines and comments."""
+        while self.current_token.type in (TokenType.NEWLINE, TokenType.COMMENT):
+            self.advance()
+
+    def parse_metadata_value(self, value_str: str) -> str:
+        """Parse metadata value, handling special cases."""
+        return value_str.strip()
+
+    def parse_metadata_header(self) -> Metadata:
+        """Parse metadata header from comments.
+
+        Expected format:
+        # [M:Name] [ID:ID] [Role:Core] [Layer:Domain] [Risk:High]
+        # [Context:GPU-ML] [Dims:N=agents,B=batch]
+        """
+        metadata_dict = {}
+        dims = {}
+        requires = []
+
+        # Collect all header comment lines
+        while self.current_token.type == TokenType.COMMENT:
+            comment = self.current_token.value
+            self.advance()
+
+            # Extract metadata tags [Key:Value]
+            tags = re.findall(r"\[([^:\]]+):([^\]]+)\]", comment)
+
+            for key, value in tags:
+                key = key.strip()
+                value = value.strip()
+
+                if key == "Dims":
+                    # Parse dimension definitions: N=agents, B=batch
+                    for dim_def in value.split(","):
+                        if "=" in dim_def:
+                            dim_name, dim_desc = dim_def.split("=", 1)
+                            dims[dim_name.strip()] = dim_desc.strip()
+                elif key == "Requires":
+                    # Parse requirements
+                    requires.extend(v.strip() for v in value.split(","))
+                else:
+                    metadata_dict[key] = value
+
+            self.skip_newlines()
+
+        return Metadata(
+            module_name=metadata_dict.get("M"),
+            module_id=metadata_dict.get("ID"),
+            role=metadata_dict.get("Role"),
+            layer=metadata_dict.get("Layer"),
+            risk=metadata_dict.get("Risk"),
+            context=metadata_dict.get("Context"),
+            dims=dims,
+            requires=requires,
+            owner=metadata_dict.get("Owner"),
+            custom={k: v for k, v in metadata_dict.items() if k not in Metadata.__annotations__},
+        )
+
+    def parse_type_spec(self) -> TypeSpec:
+        """Parse type specification.
+
+        Format: Type[Shape]@Location or Type[Shape]@Loc1→Loc2
+        """
+        base_type = self.expect(TokenType.IDENTIFIER).value
+
+        shape = None
+        if self.current_token.type == TokenType.LBRACKET:
+            shape = self.parse_shape()
+
+        location = None
+        transfer = None
+        if self.current_token.type == TokenType.AT:
+            self.advance()  # Skip @
+            loc1 = self.expect(TokenType.IDENTIFIER).value
+
+            # Check for transfer: @A→B
+            if self.current_token.type == TokenType.ARROW:
+                self.advance()
+                loc2 = self.expect(TokenType.IDENTIFIER).value
+                transfer = (loc1, loc2)
+            else:
+                location = loc1
+
+        return TypeSpec(base_type=base_type, shape=shape, location=location, transfer=transfer)
+
+    def parse_shape(self) -> List[str]:
+        """Parse shape specification [N, C, H, W]."""
+        self.expect(TokenType.LBRACKET)
+        dimensions = []
+
+        while self.current_token.type != TokenType.RBRACKET:
+            if self.current_token.type == TokenType.IDENTIFIER:
+                dimensions.append(self.current_token.value)
+                self.advance()
+            elif self.current_token.type == TokenType.NUMBER:
+                dimensions.append(self.current_token.value)
+                self.advance()
+            else:
+                raise ParseError(f"Unexpected token in shape: {self.current_token.value}",
+                               self.current_token)
+
+            if self.current_token.type == TokenType.COMMA:
+                self.advance()
+
+        self.expect(TokenType.RBRACKET)
+        return dimensions
+
+    def parse_tag(self) -> Tag:
+        """Parse a computational tag [Base:Qual1:Qual2]."""
+        self.expect(TokenType.LBRACKET)
+
+        parts = []
+        while self.current_token.type != TokenType.RBRACKET:
+            if self.current_token.type == TokenType.IDENTIFIER:
+                parts.append(self.current_token.value)
+                self.advance()
+            elif self.current_token.type in (TokenType.GRADIENT, TokenType.TENSOR_OP):
+                parts.append(self.current_token.value)
+                self.advance()
+            else:
+                # Complex qualifier like O(N)
+                qual = ""
+                while self.current_token.type not in (TokenType.COLON, TokenType.RBRACKET):
+                    qual += self.current_token.value
+                    self.advance()
+                if qual:
+                    parts.append(qual)
+
+            if self.current_token.type == TokenType.COLON:
+                self.advance()
+
+        self.expect(TokenType.RBRACKET)
+
+        if not parts:
+            raise ParseError("Empty tag", self.current_token)
+
+        base = parts[0]
+        qualifiers = parts[1:] if len(parts) > 1 else []
+
+        return Tag(base=base, qualifiers=qualifiers)
+
+    def parse_expression(self) -> Expression:
+        """Parse an expression."""
+        return self.parse_binary_expr()
+
+    def parse_binary_expr(self) -> Expression:
+        """Parse binary expression with operators."""
+        left = self.parse_primary_expr()
+
+        while self.current_token.type in (
+            TokenType.PLUS,
+            TokenType.MINUS,
+            TokenType.STAR,
+            TokenType.SLASH,
+            TokenType.TENSOR_OP,
+            TokenType.CARET,
+            TokenType.GT,
+            TokenType.LT,
+            TokenType.GTE,
+            TokenType.LTE,
+            TokenType.NE,
+        ):
+            op = self.current_token.value
+            self.advance()
+            right = self.parse_primary_expr()
+            left = BinaryOp(operator=op, left=left, right=right)
+
+        return left
+
+    def parse_primary_expr(self) -> Expression:
+        """Parse primary expression (identifier, literal, function call, etc.)."""
+        # Number literal
+        if self.current_token.type == TokenType.NUMBER:
+            value = self.current_token.value
+            self.advance()
+            return Literal(value=float(value) if "." in value else int(value))
+
+        # String literal
+        if self.current_token.type == TokenType.STRING:
+            value = self.current_token.value
+            self.advance()
+            return Literal(value=value)
+
+        # Identifier or function call
+        if self.current_token.type == TokenType.IDENTIFIER:
+            name = self.current_token.value
+            self.advance()
+
+            # Function call
+            if self.current_token.type == TokenType.LPAREN:
+                return self.parse_function_call(name)
+
+            # Just an identifier
+            return Identifier(name=name)
+
+        # Parenthesized expression
+        if self.current_token.type == TokenType.LPAREN:
+            self.advance()
+            expr = self.parse_expression()
+            self.expect(TokenType.RPAREN)
+            return expr
+
+        raise ParseError(f"Unexpected token in expression: {self.current_token.value}",
+                        self.current_token)
+
+    def parse_function_call(self, name: str) -> FunctionCall:
+        """Parse function call."""
+        self.expect(TokenType.LPAREN)
+        args = []
+
+        while self.current_token.type != TokenType.RPAREN:
+            args.append(self.parse_expression())
+            if self.current_token.type == TokenType.COMMA:
+                self.advance()
+
+        self.expect(TokenType.RPAREN)
+        return FunctionCall(function=name, args=args)
+
+    def parse_state_var(self, line: int) -> StateVar:
+        """Parse state variable declaration.
+
+        Format: name ∈ Type[Shape]@Location
+        """
+        name = self.expect(TokenType.IDENTIFIER).value
+
+        type_spec = None
+        if self.current_token.type == TokenType.MEMBER_OF:
+            self.advance()
+            type_spec = self.parse_type_spec()
+
+        # Optional comment
+        comment = None
+        if self.current_token.type == TokenType.COMMENT:
+            comment = self.current_token.value
+            self.advance()
+
+        return StateVar(name=name, type_spec=type_spec, line=line, comment=comment)
+
+    def parse_statement(self, line: int) -> Statement:
+        """Parse a single statement."""
+        # Skip leading whitespace
+        self.skip_comments()
+
+        # Profiling annotation
+        profiling = None
+        if self.current_token.type == TokenType.PROFILING:
+            self.advance()
+            if self.current_token.type == TokenType.NUMBER:
+                profiling = self.current_token.value
+                self.advance()
+                if self.current_token.type == TokenType.IDENTIFIER:
+                    profiling += self.current_token.value  # e.g., "ms"
+                    self.advance()
+
+        # Phase markers {Phase: Name}
+        if self.current_token.type == TokenType.LBRACE:
+            # Skip phase markers
+            while self.current_token.type != TokenType.RBRACE and \
+                  self.current_token.type != TokenType.EOF:
+                self.advance()
+            if self.current_token.type == TokenType.RBRACE:
+                self.advance()
+            return Statement(line=line, statement_type="phase")
+
+        # Happens-after dependency marker
+        if self.current_token.type == TokenType.HAPPENS_AFTER:
+            self.advance()
+            # Parse the statement after the ⊳
+            stmt = self.parse_statement(line)
+            # Mark it as having causal dependency
+            return Statement(
+                line=line,
+                statement_type="causal",
+                operator="⊳",
+                rhs=Identifier(name="next"),  # Placeholder
+                tags=stmt.tags,
+            )
+
+        # Assertion
+        if self.current_token.type == TokenType.ASSERT:
+            self.advance()
+            condition = self.parse_expression()
+            return Statement(
+                line=line, statement_type="assertion", operator="⊢", rhs=condition
+            )
+
+        # Return statement
+        if self.current_token.type == TokenType.RETURN:
+            self.advance()
+            expr = None
+            if self.current_token.type not in (TokenType.NEWLINE, TokenType.EOF):
+                expr = self.parse_expression()
+            return Statement(line=line, statement_type="return", operator="←", rhs=expr)
+
+        # Conditional
+        if self.current_token.type == TokenType.QUESTION:
+            self.advance()
+            condition = self.parse_expression()
+            tags = []
+            if self.current_token.type == TokenType.ARROW:
+                self.advance()
+                if self.current_token.type == TokenType.LBRACKET:
+                    tags.append(self.parse_tag())
+            return Statement(
+                line=line,
+                statement_type="conditional",
+                operator="?",
+                condition=condition,
+                tags=tags,
+            )
+
+        # Assignment or mutation
+        if self.current_token.type == TokenType.IDENTIFIER:
+            lhs = self.current_token.value
+            self.advance()
+
+            # Check operator
+            operator = None
+            if self.current_token.type in (
+                TokenType.EQUALS,
+                TokenType.ASSIGN,
+                TokenType.LOCAL_MUT,
+                TokenType.SYSTEM_MUT,
+                TokenType.MEMBER_OF,
+            ):
+                operator = self.current_token.value
+                self.advance()
+
+            # Parse RHS
+            rhs = None
+            if self.current_token.type not in (TokenType.NEWLINE, TokenType.EOF):
+                rhs = self.parse_expression()
+
+            # Parse tags if flow operator present
+            tags = []
+            if self.current_token.type == TokenType.ARROW:
+                self.advance()
+                if self.current_token.type == TokenType.LBRACKET:
+                    tags.append(self.parse_tag())
+
+            statement_type = "assignment"
+            if operator in ("!", "!!"):
+                statement_type = "mutation"
+
+            return Statement(
+                line=line,
+                statement_type=statement_type,
+                lhs=lhs,
+                operator=operator,
+                rhs=rhs,
+                tags=tags,
+                profiling=profiling,
+            )
+
+        # System mutation (function call with !!)
+        if self.current_token.type == TokenType.SYSTEM_MUT:
+            self.advance()
+            if self.current_token.type == TokenType.IDENTIFIER:
+                call = self.parse_function_call(self.current_token.value)
+                self.advance()
+                tags = []
+                if self.current_token.type == TokenType.ARROW:
+                    self.advance()
+                    if self.current_token.type == TokenType.LBRACKET:
+                        tags.append(self.parse_tag())
+                return Statement(
+                    line=line,
+                    statement_type="mutation",
+                    operator="!!",
+                    rhs=call,
+                    tags=tags,
+                )
+
+        return Statement(line=line, statement_type="unknown")
+
+    def parse_function(self, line: int) -> Function:
+        """Parse function definition.
+
+        Format:
+        F:name(params) [modifiers]
+          [Pre] conditions
+          [Post] conditions
+          [Err] errors
+          body
+        """
+        # Expect F:name
+        self.expect(TokenType.IDENTIFIER)  # F
+        self.expect(TokenType.COLON)
+        name = self.expect(TokenType.IDENTIFIER).value
+
+        # Parse parameters
+        params = []
+        if self.current_token.type == TokenType.LPAREN:
+            self.advance()
+            while self.current_token.type != TokenType.RPAREN:
+                param_name = self.expect(TokenType.IDENTIFIER).value
+                type_spec = None
+                if self.current_token.type == TokenType.COLON:
+                    self.advance()
+                    type_spec = self.parse_type_spec()
+                params.append(Parameter(name=param_name, type_spec=type_spec))
+
+                if self.current_token.type == TokenType.COMMA:
+                    self.advance()
+            self.expect(TokenType.RPAREN)
+
+        # Parse modifiers [Async], [Role:Core], etc.
+        modifiers = []
+        tags = []
+        while self.current_token.type == TokenType.LBRACKET:
+            tag = self.parse_tag()
+            if tag.base in ("Async", "Pure", "Safe"):
+                modifiers.append(tag.base)
+            else:
+                tags.append(tag)
+
+        self.skip_newlines()
+
+        # Parse contracts
+        preconditions = []
+        postconditions = []
+        errors = []
+
+        while self.current_token.type == TokenType.LBRACKET:
+            self.advance()
+            contract_type = self.expect(TokenType.IDENTIFIER).value
+            self.expect(TokenType.RBRACKET)
+
+            if contract_type == "Pre":
+                # Parse precondition
+                cond = self.read_until_newline()
+                preconditions.append(cond)
+            elif contract_type == "Post":
+                cond = self.read_until_newline()
+                postconditions.append(cond)
+            elif contract_type == "Err":
+                err = self.read_until_newline()
+                errors.extend(e.strip() for e in err.split(","))
+
+            self.skip_newlines()
+
+        # Parse body
+        body = []
+        while self.current_token.type not in (TokenType.EOF,) and \
+              not self.is_next_entity():
+            if self.current_token.type == TokenType.NEWLINE:
+                self.advance()
+                continue
+            stmt = self.parse_statement(self.current_token.line)
+            body.append(stmt)
+            self.skip_whitespace()
+
+        return Function(
+            name=name,
+            params=params,
+            modifiers=modifiers,
+            tags=tags,
+            preconditions=preconditions,
+            postconditions=postconditions,
+            errors=errors,
+            body=body,
+            line=line,
+        )
+
+    def is_next_entity(self) -> bool:
+        """Check if next token starts an entity definition."""
+        if self.current_token.type == TokenType.IDENTIFIER:
+            return self.current_token.value in ENTITY_PREFIXES
+        return False
+
+    def read_until_newline(self) -> str:
+        """Read tokens until newline."""
+        parts = []
+        while self.current_token.type not in (TokenType.NEWLINE, TokenType.EOF):
+            parts.append(self.current_token.value)
+            self.advance()
+        return " ".join(parts)
+
+    def parse(self) -> PyShortAST:
+        """Parse the entire PyShorthand file.
+
+        Returns:
+            Complete AST
+        """
+        ast = PyShortAST()
+
+        try:
+            self.skip_whitespace()
+
+            # Parse metadata header
+            if self.current_token.type == TokenType.COMMENT:
+                ast.metadata = self.parse_metadata_header()
+
+            self.skip_whitespace()
+
+            # Parse entities and statements
+            while self.current_token.type != TokenType.EOF:
+                self.skip_whitespace()
+
+                if self.current_token.type == TokenType.EOF:
+                    break
+
+                line = self.current_token.line
+
+                # Entity definition
+                if self.current_token.type == TokenType.IDENTIFIER:
+                    entity_prefix = self.current_token.value
+
+                    if entity_prefix == "C":
+                        # Class definition
+                        entity = self.parse_class(line)
+                        ast.entities.append(entity)
+                    elif entity_prefix == "F":
+                        # Function definition
+                        func = self.parse_function(line)
+                        ast.functions.append(func)
+                    elif entity_prefix in ENTITY_PREFIXES:
+                        # Other entity types
+                        self.advance()
+                    else:
+                        # Statement
+                        stmt = self.parse_statement(line)
+                        ast.statements.append(stmt)
+                else:
+                    # Statement
+                    stmt = self.parse_statement(line)
+                    ast.statements.append(stmt)
+
+                self.skip_whitespace()
+
+        except ParseError as e:
+            diagnostic = Diagnostic(
+                severity=DiagnosticSeverity.ERROR,
+                line=e.token.line,
+                column=e.token.column,
+                message=e.message,
+            )
+            ast.add_diagnostic(diagnostic)
+
+        return ast
+
+    def parse_class(self, line: int) -> Class:
+        """Parse class definition."""
+        self.expect(TokenType.IDENTIFIER)  # C
+        self.expect(TokenType.COLON)
+        name = self.expect(TokenType.IDENTIFIER).value
+
+        self.skip_newlines()
+
+        # Parse dependencies
+        dependencies = []
+        if self.current_token.type == TokenType.LBRACKET:
+            # Dependencies line like: ◊ [Ref:A], [Ref:B]
+            while self.current_token.type != TokenType.NEWLINE:
+                if self.current_token.type == TokenType.LBRACKET:
+                    self.advance()
+                    if self.current_token.value == "Ref":
+                        self.advance()
+                        self.expect(TokenType.COLON)
+                        ref_id = self.expect(TokenType.IDENTIFIER).value
+                        self.expect(TokenType.RBRACKET)
+                        dependencies.append(Reference(ref_id=ref_id, line=line))
+                else:
+                    self.advance()
+            self.skip_newlines()
+
+        # Parse state variables
+        state = []
+        while self.current_token.type == TokenType.IDENTIFIER:
+            # Check if this is a method (F:name) or state variable
+            if self.peek() and self.peek().type == TokenType.COLON:  # type: ignore
+                break
+            state_var = self.parse_state_var(self.current_token.line)
+            state.append(state_var)
+            self.skip_newlines()
+
+        # Parse methods
+        methods = []
+        while self.current_token.type == TokenType.IDENTIFIER and \
+              self.current_token.value == "F":
+            method = self.parse_function(self.current_token.line)
+            methods.append(method)
+            self.skip_newlines()
+
+        return Class(
+            name=name, state=state, methods=methods, dependencies=dependencies, line=line
+        )
+
+
+def parse_file(file_path: str) -> PyShortAST:
+    """Parse a PyShorthand file.
+
+    Args:
+        file_path: Path to .pys file
+
+    Returns:
+        Parsed AST
+
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        ParseError: If parsing fails
+    """
+    with open(file_path, "r", encoding="utf-8") as f:
+        source = f.read()
+
+    return parse_string(source, file_path)
+
+
+def parse_string(source: str, source_name: str = "<string>") -> PyShortAST:
+    """Parse PyShorthand source code.
+
+    Args:
+        source: Source code string
+        source_name: Name for error reporting
+
+    Returns:
+        Parsed AST
+    """
+    tokenizer = Tokenizer(source)
+    tokens = tokenizer.tokenize()
+    parser = Parser(tokens)
+    ast = parser.parse()
+    ast.source_file = source_name
+    return ast

@@ -1,0 +1,391 @@
+"""Tokenizer for PyShorthand notation.
+
+This module provides lexical analysis for PyShorthand files,
+breaking input text into a stream of tokens.
+"""
+
+from dataclasses import dataclass
+from enum import Enum, auto
+from typing import Iterator, List, Optional
+
+
+class TokenType(Enum):
+    """Token types for PyShorthand."""
+
+    # Literals and identifiers
+    IDENTIFIER = auto()
+    NUMBER = auto()
+    STRING = auto()
+
+    # Operators
+    ARROW = auto()  # →, ->
+    HAPPENS_AFTER = auto()  # ⊳, >>
+    RETURN = auto()  # ←, <-
+    MEMBER_OF = auto()  # ∈, IN
+    EQUALS = auto()  # ≡, ==
+    ASSIGN = auto()  # =
+    LOCAL_MUT = auto()  # !
+    SYSTEM_MUT = auto()  # !!
+    ERROR_RAISE = auto()  # !?
+    ERROR_CHECK = auto()  # ?!
+    QUESTION = auto()  # ?
+    ASSERT = auto()  # ⊢, ASSERT
+    SUM = auto()  # Σ, SUM
+    PRODUCT = auto()  # Π, PROD
+    TENSOR_OP = auto()  # ⊗, MAT
+    GRADIENT = auto()  # ∇, GRAD
+    ALIAS = auto()  # ≈, REF
+    CLONE = auto()  # ≜, COPY
+    FOR_ALL = auto()  # ∀, FOR
+
+    # Delimiters
+    LPAREN = auto()  # (
+    RPAREN = auto()  # )
+    LBRACKET = auto()  # [
+    RBRACKET = auto()  # ]
+    LBRACE = auto()  # {
+    RBRACE = auto()  # }
+    COMMA = auto()  # ,
+    COLON = auto()  # :
+    SEMICOLON = auto()  # ;
+    DOT = auto()  # .
+    PIPE = auto()  # |
+    AT = auto()  # @
+
+    # Special
+    COMMENT = auto()  # //
+    PROFILING = auto()  # ⏱
+    NEWLINE = auto()
+    EOF = auto()
+
+    # Math operators
+    PLUS = auto()
+    MINUS = auto()
+    STAR = auto()
+    SLASH = auto()
+    PERCENT = auto()
+    POWER = auto()
+    CARET = auto()
+
+    # Comparison
+    GT = auto()
+    LT = auto()
+    GTE = auto()
+    LTE = auto()
+    NE = auto()
+
+
+@dataclass
+class Token:
+    """A single lexical token."""
+
+    type: TokenType
+    value: str
+    line: int
+    column: int
+
+    def __repr__(self) -> str:
+        return f"Token({self.type.name}, {self.value!r}, {self.line}:{self.column})"
+
+
+class Tokenizer:
+    """Tokenizes PyShorthand source code."""
+
+    def __init__(self, source: str) -> None:
+        """Initialize tokenizer.
+
+        Args:
+            source: Source code to tokenize
+        """
+        self.source = source
+        self.pos = 0
+        self.line = 1
+        self.column = 1
+        self.tokens: List[Token] = []
+
+    def current_char(self) -> Optional[str]:
+        """Get current character without advancing."""
+        if self.pos >= len(self.source):
+            return None
+        return self.source[self.pos]
+
+    def peek_char(self, offset: int = 1) -> Optional[str]:
+        """Peek at character at offset from current position."""
+        pos = self.pos + offset
+        if pos >= len(self.source):
+            return None
+        return self.source[pos]
+
+    def advance(self) -> Optional[str]:
+        """Advance position and return current character."""
+        if self.pos >= len(self.source):
+            return None
+
+        char = self.source[self.pos]
+        self.pos += 1
+
+        if char == "\n":
+            self.line += 1
+            self.column = 1
+        else:
+            self.column += 1
+
+        return char
+
+    def skip_whitespace(self) -> None:
+        """Skip whitespace except newlines."""
+        while self.current_char() in (" ", "\t", "\r"):
+            self.advance()
+
+    def read_while(self, predicate) -> str:
+        """Read characters while predicate is true."""
+        start = self.pos
+        while self.current_char() is not None and predicate(self.current_char()):
+            self.advance()
+        return self.source[start : self.pos]
+
+    def read_identifier(self) -> str:
+        """Read an identifier or keyword."""
+        return self.read_while(lambda c: c.isalnum() or c in ("_", "-"))
+
+    def read_number(self) -> str:
+        """Read a numeric literal."""
+        num = self.read_while(lambda c: c.isdigit() or c == ".")
+        # Check for scientific notation
+        if self.current_char() in ("e", "E"):
+            num += self.advance() or ""
+            if self.current_char() in ("+", "-"):
+                num += self.advance() or ""
+            num += self.read_while(lambda c: c.isdigit())
+        return num
+
+    def read_string(self, quote: str) -> str:
+        """Read a string literal."""
+        value = ""
+        self.advance()  # Skip opening quote
+
+        while self.current_char() != quote:
+            char = self.current_char()
+            if char is None:
+                raise ValueError(f"Unterminated string at line {self.line}")
+            if char == "\\":
+                self.advance()
+                next_char = self.current_char()
+                if next_char in ("n", "t", "r", "\\", quote):
+                    value += self.advance() or ""
+                else:
+                    value += next_char or ""
+            else:
+                value += char
+            self.advance()
+
+        self.advance()  # Skip closing quote
+        return value
+
+    def tokenize(self) -> List[Token]:
+        """Tokenize the entire source.
+
+        Returns:
+            List of tokens
+        """
+        while self.pos < len(self.source):
+            self.skip_whitespace()
+
+            char = self.current_char()
+            if char is None:
+                break
+
+            line = self.line
+            col = self.column
+
+            # Newline
+            if char == "\n":
+                self.advance()
+                self.tokens.append(Token(TokenType.NEWLINE, "\\n", line, col))
+                continue
+
+            # Comments (both // and # style)
+            if char == "/" and self.peek_char() == "/":
+                self.advance()
+                self.advance()
+                comment = self.read_while(lambda c: c != "\n")
+                self.tokens.append(Token(TokenType.COMMENT, comment.strip(), line, col))
+                continue
+
+            # Python-style comments (for metadata headers)
+            if char == "#":
+                self.advance()
+                comment = self.read_while(lambda c: c != "\n")
+                self.tokens.append(Token(TokenType.COMMENT, comment.strip(), line, col))
+                continue
+
+            # Numbers
+            if char.isdigit():
+                num = self.read_number()
+                self.tokens.append(Token(TokenType.NUMBER, num, line, col))
+                continue
+
+            # Strings
+            if char in ('"', "'"):
+                string_val = self.read_string(char)
+                self.tokens.append(Token(TokenType.STRING, string_val, line, col))
+                continue
+
+            # Multi-character operators
+            if char == "!" and self.peek_char() == "!":
+                self.advance()
+                self.advance()
+                self.tokens.append(Token(TokenType.SYSTEM_MUT, "!!", line, col))
+                continue
+
+            if char == "!" and self.peek_char() == "?":
+                self.advance()
+                self.advance()
+                self.tokens.append(Token(TokenType.ERROR_RAISE, "!?", line, col))
+                continue
+
+            if char == "?" and self.peek_char() == "!":
+                self.advance()
+                self.advance()
+                self.tokens.append(Token(TokenType.ERROR_CHECK, "?!", line, col))
+                continue
+
+            if char == "-" and self.peek_char() == ">":
+                self.advance()
+                self.advance()
+                self.tokens.append(Token(TokenType.ARROW, "->", line, col))
+                continue
+
+            if char == "<" and self.peek_char() == "-":
+                self.advance()
+                self.advance()
+                self.tokens.append(Token(TokenType.RETURN, "<-", line, col))
+                continue
+
+            if char == ">" and self.peek_char() == ">":
+                self.advance()
+                self.advance()
+                self.tokens.append(Token(TokenType.HAPPENS_AFTER, ">>", line, col))
+                continue
+
+            if char == "=" and self.peek_char() == "=":
+                self.advance()
+                self.advance()
+                self.tokens.append(Token(TokenType.EQUALS, "==", line, col))
+                continue
+
+            if char == ">" and self.peek_char() == "=":
+                self.advance()
+                self.advance()
+                self.tokens.append(Token(TokenType.GTE, ">=", line, col))
+                continue
+
+            if char == "<" and self.peek_char() == "=":
+                self.advance()
+                self.advance()
+                self.tokens.append(Token(TokenType.LTE, "<=", line, col))
+                continue
+
+            if char == "!" and self.peek_char() == "=":
+                self.advance()
+                self.advance()
+                self.tokens.append(Token(TokenType.NE, "!=", line, col))
+                continue
+
+            if char == "*" and self.peek_char() == "*":
+                self.advance()
+                self.advance()
+                self.tokens.append(Token(TokenType.POWER, "**", line, col))
+                continue
+
+            # Skip decorative symbols (◊ for dependencies)
+            if char == "◊":
+                self.advance()
+                continue
+
+            # Unicode operators
+            unicode_map = {
+                "→": TokenType.ARROW,
+                "⊳": TokenType.HAPPENS_AFTER,
+                "←": TokenType.RETURN,
+                "∈": TokenType.MEMBER_OF,
+                "≡": TokenType.EQUALS,
+                "⊢": TokenType.ASSERT,
+                "Σ": TokenType.SUM,
+                "Π": TokenType.PRODUCT,
+                "⊗": TokenType.TENSOR_OP,
+                "∇": TokenType.GRADIENT,
+                "≈": TokenType.ALIAS,
+                "≜": TokenType.CLONE,
+                "∀": TokenType.FOR_ALL,
+                "⏱": TokenType.PROFILING,
+            }
+
+            if char in unicode_map:
+                self.advance()
+                self.tokens.append(Token(unicode_map[char], char, line, col))
+                continue
+
+            # Single-character tokens
+            single_char_map = {
+                "(": TokenType.LPAREN,
+                ")": TokenType.RPAREN,
+                "[": TokenType.LBRACKET,
+                "]": TokenType.RBRACKET,
+                "{": TokenType.LBRACE,
+                "}": TokenType.RBRACE,
+                ",": TokenType.COMMA,
+                ":": TokenType.COLON,
+                ";": TokenType.SEMICOLON,
+                ".": TokenType.DOT,
+                "|": TokenType.PIPE,
+                "@": TokenType.AT,
+                "!": TokenType.LOCAL_MUT,
+                "?": TokenType.QUESTION,
+                "+": TokenType.PLUS,
+                "-": TokenType.MINUS,
+                "*": TokenType.STAR,
+                "/": TokenType.SLASH,
+                "%": TokenType.PERCENT,
+                "^": TokenType.CARET,
+                ">": TokenType.GT,
+                "<": TokenType.LT,
+                "=": TokenType.ASSIGN,
+            }
+
+            if char in single_char_map:
+                self.advance()
+                self.tokens.append(Token(single_char_map[char], char, line, col))
+                continue
+
+            # Identifiers and keywords
+            if char.isalpha() or char == "_":
+                identifier = self.read_identifier()
+
+                # Check for ASCII keywords
+                keyword_map = {
+                    "IN": TokenType.MEMBER_OF,
+                    "ASSERT": TokenType.ASSERT,
+                    "SUM": TokenType.SUM,
+                    "PROD": TokenType.PRODUCT,
+                    "MAT": TokenType.TENSOR_OP,
+                    "GRAD": TokenType.GRADIENT,
+                    "REF": TokenType.ALIAS,
+                    "COPY": TokenType.CLONE,
+                    "FOR": TokenType.FOR_ALL,
+                }
+
+                if identifier in keyword_map:
+                    self.tokens.append(Token(keyword_map[identifier], identifier, line, col))
+                else:
+                    self.tokens.append(Token(TokenType.IDENTIFIER, identifier, line, col))
+                continue
+
+            # Unknown character
+            raise ValueError(
+                f"Unexpected character {char!r} at line {self.line}, column {self.column}"
+            )
+
+        # Add EOF token
+        self.tokens.append(Token(TokenType.EOF, "", self.line, self.column))
+        return self.tokens
