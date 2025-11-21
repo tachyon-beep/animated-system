@@ -474,6 +474,11 @@ class Parser:
                     tags=tags,
                 )
 
+        # CRITICAL: Advance token to prevent infinite loop on unknown tokens
+        # If we reach here, we didn't recognize the token - skip it
+        if self.current_token.type != TokenType.EOF:
+            self.advance()
+
         return Statement(line=line, statement_type="unknown")
 
     def parse_function(self, line: int) -> Function:
@@ -506,6 +511,12 @@ class Parser:
                 if self.current_token.type == TokenType.COMMA:
                     self.advance()
             self.expect(TokenType.RPAREN)
+
+        # Parse return type if present: → Type[Shape]@Location
+        return_type = None
+        if self.current_token.type == TokenType.ARROW:
+            self.advance()
+            return_type = self.parse_type_spec()
 
         # Parse modifiers [Async], [Role:Core], etc.
         modifiers = []
@@ -556,6 +567,7 @@ class Parser:
         return Function(
             name=name,
             params=params,
+            return_type=return_type,
             modifiers=modifiers,
             tags=tags,
             preconditions=preconditions,
@@ -588,12 +600,14 @@ class Parser:
         ast = PyShortAST()
 
         try:
-            self.skip_whitespace()
+            # Skip only newlines before metadata (not comments!)
+            self.skip_newlines()
 
-            # Parse metadata header
+            # Parse metadata header (which are comments)
             if self.current_token.type == TokenType.COMMENT:
                 ast.metadata = self.parse_metadata_header()
 
+            # Now skip both newlines and comments
             self.skip_whitespace()
 
             # Parse entities and statements
@@ -605,8 +619,61 @@ class Parser:
 
                 line = self.current_token.line
 
-                # Entity definition
-                if self.current_token.type == TokenType.IDENTIFIER:
+                # Entity definition with bracket syntax: [C:Name], [D:Name], etc.
+                if self.current_token.type == TokenType.LBRACKET:
+                    # Peek ahead to check if this is an entity definition
+                    next_tok = self.peek(1)
+                    if next_tok and next_tok.type == TokenType.IDENTIFIER and next_tok.value in ENTITY_PREFIXES:
+                        # This is an entity definition
+                        self.advance()  # Skip [
+                        entity_prefix = self.current_token.value
+
+                        if entity_prefix == "C":
+                            try:
+                                entity = self.parse_class(line)
+                                ast.entities.append(entity)
+                            except ParseError as e:
+                                # Add diagnostic but don't crash entire parse
+                                diagnostic = Diagnostic(
+                                    severity=DiagnosticSeverity.ERROR,
+                                    line=e.token.line,
+                                    column=e.token.column,
+                                    message=e.message,
+                                )
+                                ast.add_diagnostic(diagnostic)
+                                # Skip to next likely entity
+                                while self.current_token.type not in (TokenType.EOF, TokenType.LBRACKET):
+                                    if self.current_token.type == TokenType.IDENTIFIER and \
+                                       self.current_token.value in ENTITY_PREFIXES:
+                                        break
+                                    self.advance()
+                        elif entity_prefix == "F":
+                            try:
+                                func = self.parse_function(line)
+                                ast.functions.append(func)
+                            except ParseError as e:
+                                diagnostic = Diagnostic(
+                                    severity=DiagnosticSeverity.ERROR,
+                                    line=e.token.line,
+                                    column=e.token.column,
+                                    message=e.message,
+                                )
+                                ast.add_diagnostic(diagnostic)
+                        else:
+                            # Other entity types - skip the rest
+                            while self.current_token.type != TokenType.RBRACKET and \
+                                  self.current_token.type != TokenType.EOF:
+                                self.advance()
+                            if self.current_token.type == TokenType.RBRACKET:
+                                self.advance()
+                    else:
+                        # Not an entity, treat as statement
+                        stmt = self.parse_statement(line)
+                        if stmt.statement_type != "unknown":
+                            ast.statements.append(stmt)
+
+                # Entity definition without brackets (old style): C:Name, F:name, etc.
+                elif self.current_token.type == TokenType.IDENTIFIER:
                     entity_prefix = self.current_token.value
 
                     if entity_prefix == "C":
@@ -623,11 +690,13 @@ class Parser:
                     else:
                         # Statement
                         stmt = self.parse_statement(line)
-                        ast.statements.append(stmt)
+                        if stmt.statement_type != "unknown":
+                            ast.statements.append(stmt)
                 else:
-                    # Statement
+                    # Statement or unknown token
                     stmt = self.parse_statement(line)
-                    ast.statements.append(stmt)
+                    if stmt.statement_type != "unknown":
+                        ast.statements.append(stmt)
 
                 self.skip_whitespace()
 
@@ -648,6 +717,10 @@ class Parser:
         self.expect(TokenType.COLON)
         name = self.expect(TokenType.IDENTIFIER).value
 
+        # If using bracket syntax [C:Name], consume the closing ]
+        if self.current_token.type == TokenType.RBRACKET:
+            self.advance()
+
         self.skip_newlines()
 
         # Parse dependencies
@@ -667,6 +740,9 @@ class Parser:
                     self.advance()
             self.skip_newlines()
 
+        # Skip comments and newlines before state variables
+        self.skip_whitespace()
+
         # Parse state variables
         state = []
         while self.current_token.type == TokenType.IDENTIFIER:
@@ -677,13 +753,30 @@ class Parser:
             state.append(state_var)
             self.skip_newlines()
 
+        # Skip comments before methods
+        self.skip_whitespace()
+
         # Parse methods
         methods = []
         while self.current_token.type == TokenType.IDENTIFIER and \
               self.current_token.value == "F":
-            method = self.parse_function(self.current_token.line)
-            methods.append(method)
-            self.skip_newlines()
+            try:
+                method = self.parse_function(self.current_token.line)
+                methods.append(method)
+                self.skip_newlines()
+            except ParseError:
+                # Skip this method and try to continue with next one
+                # Find next method or end of class
+                while self.current_token.type != TokenType.EOF:
+                    if self.current_token.type == TokenType.IDENTIFIER and \
+                       self.current_token.value == "F":
+                        # Found next method
+                        break
+                    if self.current_token.type == TokenType.LBRACKET:
+                        # Might be next entity
+                        break
+                    self.advance()
+                # Don't re-raise - continue building class with what we have
 
         return Class(
             name=name, state=state, methods=methods, dependencies=dependencies, line=line
