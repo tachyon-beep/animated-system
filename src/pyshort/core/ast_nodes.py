@@ -40,6 +40,9 @@ class Diagnostic:
     def __str__(self) -> str:
         """Format diagnostic as human-readable string."""
         severity_str = self.severity.value
+        # Include error code if present
+        if self.code:
+            severity_str = f"{severity_str}[{self.code}]"
         location = f"line {self.line}, column {self.column}"
         result = f"{severity_str}: {self.message}\n  --> {location}"
         if self.suggestion:

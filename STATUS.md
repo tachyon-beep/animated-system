@@ -86,6 +86,75 @@ Class [VHE]:
 
 **Impact**: LOW - Core parsing works, edge cases are refinements
 
+## Recent Enhancements (November 21, 2025) ⚡
+
+### Quick Wins - Professional Tooling
+Following Phase 1 completion, added essential features to make the toolchain production-ready:
+
+#### 1. **Auto-Formatter** (`pyshort-fmt`) ✅
+- Opinionated code formatting for consistency
+- Vertical alignment of type annotations
+- Location-based sorting (GPU → CPU → Disk)
+- Unicode/ASCII preference support
+- **Batch operations**: Recursive directory formatting
+- **CI/CD integration**: `--check` mode with exit codes
+- **Statistics**: Summary of formatted files and errors
+
+```bash
+# Format entire project
+pyshort-fmt src/ --write
+
+# CI/CD check
+pyshort-fmt src/ --check  # Exit code 1 if needs formatting
+```
+
+#### 2. **Configuration File Support** (`.pyshortrc`) ✅
+- Zero-dependency config using Python's ConfigParser (INI format)
+- Searches: current dir → parent dirs → home directory
+- Supports all formatting, linting, and visualization settings
+- CLI arguments override config file settings
+- **Generate default config**: `pyshort-fmt --init-config`
+
+Example `.pyshortrc`:
+```ini
+[format]
+indent = 2
+align_types = true
+prefer_unicode = true
+sort_state_by = location
+max_line_length = 100
+
+[lint]
+strict = false
+max_line_length = 120
+
+[viz]
+direction = TB
+color_by_risk = true
+```
+
+#### 3. **Error Code System** ✅
+- Professional error identification (E001-E399, W001-W199)
+- **Categories**: Metadata, Type, Structure, Naming, Style, Best Practice
+- Error codes shown in diagnostic output: `error[E001]`
+- Enables selective filtering (future feature)
+- Full catalog with explanations
+
+Error code examples:
+- `E001`: Invalid role value
+- `E002`: Invalid layer value
+- `E003`: Invalid risk level
+- `E004`: Missing module name
+- `W001`: Line too long
+- `W003`: Missing metadata
+
+```bash
+# View error catalog
+python3 -m pyshort.core.error_codes
+```
+
+**Impact**: These enhancements make PyShorthand tooling feel like a mature, professional system ready for team adoption and CI/CD integration.
+
 ## Completed Deliverables ✅
 
 ### Phase 1: Core Infrastructure

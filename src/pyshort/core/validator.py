@@ -47,6 +47,7 @@ class MandatoryMetadataRule(Rule):
                 column=1,
                 message="Missing mandatory [M:Name] metadata header",
                 suggestion="Add '# [M:ModuleName]' at the top of the file",
+                code="E004",
             )
 
         if not ast.metadata.role:
@@ -56,6 +57,7 @@ class MandatoryMetadataRule(Rule):
                 column=1,
                 message="Missing [Role] metadata header",
                 suggestion="Add [Role:Core|Glue|Script] to metadata",
+                code="W003",
             )
 
 
@@ -74,6 +76,7 @@ class ValidMetadataValuesRule(Rule):
                 column=1,
                 message=f"Invalid role: '{ast.metadata.role}'",
                 suggestion=suggestion,
+                code="E001",
             )
 
         if ast.metadata.layer and ast.metadata.layer not in VALID_LAYERS:
@@ -86,6 +89,7 @@ class ValidMetadataValuesRule(Rule):
                 column=1,
                 message=f"Invalid layer: '{ast.metadata.layer}'",
                 suggestion=suggestion,
+                code="E002",
             )
 
         if ast.metadata.risk and ast.metadata.risk not in VALID_RISK_LEVELS:
@@ -98,6 +102,7 @@ class ValidMetadataValuesRule(Rule):
                 column=1,
                 message=f"Invalid risk level: '{ast.metadata.risk}'",
                 suggestion=suggestion,
+                code="E003",
             )
 
 
