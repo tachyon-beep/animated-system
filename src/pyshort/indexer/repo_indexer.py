@@ -68,12 +68,23 @@ class RepositoryIndexer:
 
     def should_exclude(self, path: Path) -> bool:
         """Check if path should be excluded."""
-        path_str = str(path)
+        # Check dot directories first (before loop for efficiency)
+        if path.name.startswith('.') and path.is_dir():
+            return True
+
+        # Check exclusion patterns against path components (not full string)
+        path_parts = path.parts
         for pattern in self.exclude_patterns:
-            if pattern in path_str:
-                return True
-            if path.name.startswith('.') and path.is_dir():
-                return True
+            # Handle glob patterns
+            if '*' in pattern:
+                if path.match(pattern):
+                    return True
+            else:
+                # Check if pattern matches any path component
+                # e.g., "test" should match "/foo/test/bar" but not "/home/latest/foo"
+                if pattern in path_parts:
+                    return True
+
         return False
 
     def find_python_files(self) -> List[Path]:
@@ -232,14 +243,22 @@ class RepositoryIndexer:
 
     def build_dependency_graph(self):
         """Build module-level dependency graph."""
+        # Pre-build set of all module paths for O(1) lookups
+        all_modules = set(self.index.modules.keys())
+
         for module_path, module_info in self.index.modules.items():
             dependencies = set()
 
             # Add imports that reference other modules in the repo
             for imp in module_info.imports:
-                # Check if this import refers to another module in our index
-                for other_module in self.index.modules.keys():
-                    if other_module.startswith(imp):
+                # Fast exact match check using set lookup O(1)
+                if imp in all_modules:
+                    dependencies.add(imp)
+
+                # Check for sub-modules (e.g., imp="foo" matches "foo.bar")
+                # Still need to iterate, but much less common
+                for other_module in all_modules:
+                    if other_module.startswith(imp + '.'):
                         dependencies.add(other_module)
 
             self.index.dependency_graph[module_path] = dependencies
@@ -288,7 +307,11 @@ class RepositoryIndexer:
                 # Add entities to global map
                 for entity in module_info.entities:
                     # Use fully qualified name: module.EntityName
-                    fqn = f"{module_info.module_path}.{entity.name}"
+                    # Handle empty module_path (e.g., from __init__.py at root)
+                    if module_info.module_path:
+                        fqn = f"{module_info.module_path}.{entity.name}"
+                    else:
+                        fqn = entity.name
                     self.index.entity_map[fqn] = entity
 
         if verbose:

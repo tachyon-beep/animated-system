@@ -479,7 +479,8 @@ class PyShorthandGenerator:
             base = self._get_name(annotation.value)
 
             # Handle Optional[T] - extract the inner type
-            if base == 'Optional':
+            # Supports: Optional[T], typing.Optional[T]
+            if base == 'Optional' or base.endswith('.Optional'):
                 if isinstance(annotation.slice, ast.Name):
                     inner_type = annotation.slice.id
                     # Check if it's a local class
@@ -487,6 +488,35 @@ class PyShorthandGenerator:
                         return f"[Ref:{inner_type}]?"
                     return f"{self._map_python_type(inner_type)}?"
                 return "Unknown?"
+
+            # Handle Union[X, None] - equivalent to Optional[X]
+            if base == 'Union' or base.endswith('.Union'):
+                # Check if it's Union[X, None] pattern
+                if isinstance(annotation.slice, ast.Tuple):
+                    types_in_union = annotation.slice.elts
+                    # Look for None type
+                    has_none = any(
+                        isinstance(t, ast.Constant) and t.value is None
+                        for t in types_in_union
+                    )
+                    if has_none and len(types_in_union) == 2:
+                        # This is Union[X, None], equivalent to Optional[X]
+                        non_none_type = next(
+                            t for t in types_in_union
+                            if not (isinstance(t, ast.Constant) and t.value is None)
+                        )
+                        if isinstance(non_none_type, ast.Name):
+                            inner_type = non_none_type.id
+                            if inner_type in self.local_classes:
+                                return f"[Ref:{inner_type}]?"
+                            return f"{self._map_python_type(inner_type)}?"
+                # General Union (not Optional pattern) - just use first type for now
+                # TODO: Add proper Union type support
+                if isinstance(annotation.slice, ast.Tuple) and annotation.slice.elts:
+                    first_type = annotation.slice.elts[0]
+                    if isinstance(first_type, ast.Name):
+                        return self._map_python_type(first_type.id)
+                return "Unknown"
 
             # Handle List, Tuple, etc.
             if base in ('List', 'list'):
@@ -639,16 +669,33 @@ def decompile_file(input_path: str, output_path: Optional[str] = None, aggressiv
 
     Returns:
         PyShorthand code
-    """
-    with open(input_path, 'r') as f:
-        source = f.read()
 
-    tree = ast.parse(source, filename=input_path)
+    Raises:
+        IOError: If input file cannot be read
+        SyntaxError: If Python source has syntax errors
+        RuntimeError: If output file cannot be written
+    """
+    try:
+        with open(input_path, 'r', encoding='utf-8') as f:
+            source = f.read()
+    except IOError as e:
+        raise IOError(f"Cannot read input file '{input_path}': {e}")
+    except UnicodeDecodeError as e:
+        raise IOError(f"Cannot decode input file '{input_path}' as UTF-8: {e}")
+
+    try:
+        tree = ast.parse(source, filename=input_path)
+    except SyntaxError as e:
+        raise SyntaxError(f"Syntax error in '{input_path}' at line {e.lineno}: {e.msg}")
+
     generator = PyShorthandGenerator(aggressive=aggressive)
     result = generator.generate(tree, source_file=input_path)
 
     if output_path:
-        with open(output_path, 'w') as f:
-            f.write(result)
+        try:
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(result)
+        except IOError as e:
+            raise RuntimeError(f"Cannot write output file '{output_path}': {e}")
 
     return result
