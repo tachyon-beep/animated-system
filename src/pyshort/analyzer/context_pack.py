@@ -11,7 +11,8 @@ For a given entity F, generates:
 Perfect for LLM context, code review, documentation, and refactoring.
 """
 
-from typing import Dict, List, Set, Optional
+import re
+from typing import Dict, List, Set, Optional, Callable
 from dataclasses import dataclass, field
 from collections import deque
 
@@ -194,6 +195,212 @@ class ContextPack:
         lines.append("}")
 
         return "\n".join(lines)
+
+    def filter_by_tag(self, tag_pattern: str) -> "ContextPack":
+        """Filter context pack to only include entities with matching tags.
+
+        Args:
+            tag_pattern: Tag pattern to match (e.g., "Risk:High", "O(N^2)", "GPU")
+
+        Returns:
+            New ContextPack with only matching entities
+
+        Example:
+            high_risk = pack.filter_by_tag("Risk:High")
+            gpu_entities = pack.filter_by_tag("GPU")
+        """
+        filtered_entities = {}
+        matching_names = set()
+
+        for name, entity in self.entities.items():
+            if hasattr(entity, 'tags') and entity.tags:
+                for tag in entity.tags:
+                    tag_str = str(tag)
+                    if tag_pattern in tag_str or re.search(tag_pattern, tag_str):
+                        filtered_entities[name] = entity
+                        matching_names.add(name)
+                        break
+
+        # Create filtered pack
+        return ContextPack(
+            target=self.target,
+            target_entity=self.target_entity,
+            f0_core=self.f0_core & matching_names,
+            f1_immediate=self.f1_immediate & matching_names,
+            f2_extended=self.f2_extended & matching_names,
+            class_peers=self.class_peers & matching_names,
+            related_globals=self.related_globals,
+            related_state=self.related_state,
+            entities=filtered_entities,
+        )
+
+    def filter_by_complexity(self, complexity_pattern: str) -> "ContextPack":
+        """Filter context pack to only include entities with matching complexity.
+
+        Args:
+            complexity_pattern: Complexity pattern (e.g., "O(N^2)", "O(N)", "O(1)")
+
+        Returns:
+            New ContextPack with only matching entities
+
+        Example:
+            quadratic = pack.filter_by_complexity("O(N^2)")
+            linear_or_worse = pack.filter_by_complexity("O(N.*)")
+        """
+        filtered_entities = {}
+        matching_names = set()
+
+        for name, entity in self.entities.items():
+            if hasattr(entity, 'tags') and entity.tags:
+                for tag in entity.tags:
+                    tag_str = str(tag)
+                    # Match complexity in tag (e.g., "O(N^2)", "Lin:O(N)")
+                    if complexity_pattern in tag_str or re.search(complexity_pattern, tag_str):
+                        filtered_entities[name] = entity
+                        matching_names.add(name)
+                        break
+
+        return ContextPack(
+            target=self.target,
+            target_entity=self.target_entity,
+            f0_core=self.f0_core & matching_names,
+            f1_immediate=self.f1_immediate & matching_names,
+            f2_extended=self.f2_extended & matching_names,
+            class_peers=self.class_peers & matching_names,
+            related_globals=self.related_globals,
+            related_state=self.related_state,
+            entities=filtered_entities,
+        )
+
+    def filter_by_location(self, location: str) -> "ContextPack":
+        """Filter context pack to only include entities with specific memory location.
+
+        Args:
+            location: Memory location (e.g., "GPU", "CPU", "Disk", "Cache")
+
+        Returns:
+            New ContextPack with only matching entities
+
+        Example:
+            gpu_ops = pack.filter_by_location("GPU")
+            disk_io = pack.filter_by_location("Disk")
+        """
+        filtered_entities = {}
+        matching_names = set()
+
+        for name, entity in self.entities.items():
+            # Check if entity has state variables with location specs
+            if isinstance(entity, Class) and hasattr(entity, 'state'):
+                for state_var in entity.state:
+                    if state_var.type_spec and state_var.type_spec.location == location:
+                        filtered_entities[name] = entity
+                        matching_names.add(name)
+                        break
+
+        return ContextPack(
+            target=self.target,
+            target_entity=self.target_entity,
+            f0_core=self.f0_core & matching_names,
+            f1_immediate=self.f1_immediate & matching_names,
+            f2_extended=self.f2_extended & matching_names,
+            class_peers=self.class_peers & matching_names,
+            related_globals=self.related_globals,
+            related_state=self.related_state,
+            entities=filtered_entities,
+        )
+
+    def filter_by_pattern(self, pattern: str) -> "ContextPack":
+        """Filter context pack to only include entities matching name pattern.
+
+        Args:
+            pattern: Regex pattern to match entity names
+
+        Returns:
+            New ContextPack with only matching entities
+
+        Example:
+            handlers = pack.filter_by_pattern(".*Handler$")
+            utils = pack.filter_by_pattern("^util_.*")
+        """
+        regex = re.compile(pattern)
+        matching_names = {name for name in self.all_entities() if regex.search(name)}
+
+        filtered_entities = {
+            name: entity for name, entity in self.entities.items()
+            if name in matching_names
+        }
+
+        return ContextPack(
+            target=self.target,
+            target_entity=self.target_entity,
+            f0_core=self.f0_core & matching_names,
+            f1_immediate=self.f1_immediate & matching_names,
+            f2_extended=self.f2_extended & matching_names,
+            class_peers=self.class_peers & matching_names,
+            related_globals=self.related_globals,
+            related_state=self.related_state,
+            entities=filtered_entities,
+        )
+
+    def filter_custom(self, predicate: Callable[[str, Entity], bool]) -> "ContextPack":
+        """Filter context pack using a custom predicate function.
+
+        Args:
+            predicate: Function that takes (entity_name, entity) and returns bool
+
+        Returns:
+            New ContextPack with only matching entities
+
+        Example:
+            # Filter to only classes
+            classes = pack.filter_custom(lambda name, e: isinstance(e, Class))
+
+            # Filter by state variable count
+            large = pack.filter_custom(
+                lambda n, e: isinstance(e, Class) and len(e.state) > 5
+            )
+        """
+        matching_names = set()
+        filtered_entities = {}
+
+        for name, entity in self.entities.items():
+            if predicate(name, entity):
+                matching_names.add(name)
+                filtered_entities[name] = entity
+
+        return ContextPack(
+            target=self.target,
+            target_entity=self.target_entity,
+            f0_core=self.f0_core & matching_names,
+            f1_immediate=self.f1_immediate & matching_names,
+            f2_extended=self.f2_extended & matching_names,
+            class_peers=self.class_peers & matching_names,
+            related_globals=self.related_globals,
+            related_state=self.related_state,
+            entities=filtered_entities,
+        )
+
+    def get_by_layer(self, layer: int) -> Set[str]:
+        """Get all entities at a specific dependency layer.
+
+        Args:
+            layer: Layer number (0=F0, 1=F1, 2=F2)
+
+        Returns:
+            Set of entity names at that layer
+
+        Example:
+            core = pack.get_by_layer(0)  # F0
+            immediate = pack.get_by_layer(1)  # F1
+        """
+        if layer == 0:
+            return self.f0_core.copy()
+        elif layer == 1:
+            return self.f1_immediate.copy()
+        elif layer == 2:
+            return self.f2_extended.copy()
+        else:
+            return set()
 
 
 class ContextPackGenerator:

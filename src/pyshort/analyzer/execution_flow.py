@@ -8,8 +8,9 @@ Unlike context packs (static dependency layers), execution flow tracing
 follows the actual runtime path through function calls.
 """
 
+import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Callable
 
 from pyshort.core.ast_nodes import (
     Class,
@@ -224,6 +225,164 @@ class ExecutionFlow:
         lines.append("}")
 
         return "\n".join(lines)
+
+    def filter_by_depth(self, max_depth: int) -> "ExecutionFlow":
+        """Filter execution flow to only include steps up to a certain depth.
+
+        Args:
+            max_depth: Maximum depth to include
+
+        Returns:
+            New ExecutionFlow with only steps at depth <= max_depth
+
+        Example:
+            shallow = flow.filter_by_depth(1)  # Only entry point and direct calls
+        """
+        filtered_steps = [step for step in self.steps if step.depth <= max_depth]
+
+        # Recalculate aggregates
+        new_flow = ExecutionFlow(
+            entry_point=self.entry_point,
+            steps=filtered_steps,
+        )
+        new_flow.max_depth = max(step.depth for step in filtered_steps) if filtered_steps else 0
+        new_flow.total_functions_called = len(set(step.entity_name for step in filtered_steps))
+        new_flow.variables_accessed = set()
+        new_flow.state_accessed = set()
+
+        for step in filtered_steps:
+            new_flow.variables_accessed.update(step.variables_in_scope)
+            new_flow.state_accessed.update(step.state_accessed)
+
+        return new_flow
+
+    def filter_by_pattern(self, pattern: str) -> "ExecutionFlow":
+        """Filter execution flow to only include steps matching entity name pattern.
+
+        Args:
+            pattern: Regex pattern to match entity names
+
+        Returns:
+            New ExecutionFlow with only matching steps
+
+        Example:
+            handlers = flow.filter_by_pattern(".*Handler$")
+            processors = flow.filter_by_pattern("^Process.*")
+        """
+        regex = re.compile(pattern)
+        filtered_steps = [step for step in self.steps if regex.search(step.entity_name)]
+
+        new_flow = ExecutionFlow(
+            entry_point=self.entry_point,
+            steps=filtered_steps,
+        )
+        new_flow.max_depth = max(step.depth for step in filtered_steps) if filtered_steps else 0
+        new_flow.total_functions_called = len(set(step.entity_name for step in filtered_steps))
+        new_flow.variables_accessed = set()
+        new_flow.state_accessed = set()
+
+        for step in filtered_steps:
+            new_flow.variables_accessed.update(step.variables_in_scope)
+            new_flow.state_accessed.update(step.state_accessed)
+
+        return new_flow
+
+    def filter_by_state_access(self, state_pattern: str) -> "ExecutionFlow":
+        """Filter execution flow to only include steps that access matching state.
+
+        Args:
+            state_pattern: Pattern to match state variable names
+
+        Returns:
+            New ExecutionFlow with only steps accessing matching state
+
+        Example:
+            gpu_ops = flow.filter_by_state_access(".*@GPU")
+            cache_hits = flow.filter_by_state_access(".*cache.*")
+        """
+        regex = re.compile(state_pattern)
+        filtered_steps = []
+
+        for step in self.steps:
+            if any(regex.search(state) for state in step.state_accessed):
+                filtered_steps.append(step)
+
+        new_flow = ExecutionFlow(
+            entry_point=self.entry_point,
+            steps=filtered_steps,
+        )
+        new_flow.max_depth = max(step.depth for step in filtered_steps) if filtered_steps else 0
+        new_flow.total_functions_called = len(set(step.entity_name for step in filtered_steps))
+        new_flow.variables_accessed = set()
+        new_flow.state_accessed = set()
+
+        for step in filtered_steps:
+            new_flow.variables_accessed.update(step.variables_in_scope)
+            new_flow.state_accessed.update(step.state_accessed)
+
+        return new_flow
+
+    def filter_custom(self, predicate: Callable[[ExecutionStep], bool]) -> "ExecutionFlow":
+        """Filter execution flow using a custom predicate function.
+
+        Args:
+            predicate: Function that takes ExecutionStep and returns bool
+
+        Returns:
+            New ExecutionFlow with only matching steps
+
+        Example:
+            # Filter to only steps that make calls
+            with_calls = flow.filter_custom(lambda s: len(s.calls_made) > 0)
+
+            # Filter by depth and name
+            deep_processors = flow.filter_custom(
+                lambda s: s.depth >= 2 and "Processor" in s.entity_name
+            )
+        """
+        filtered_steps = [step for step in self.steps if predicate(step)]
+
+        new_flow = ExecutionFlow(
+            entry_point=self.entry_point,
+            steps=filtered_steps,
+        )
+        new_flow.max_depth = max(step.depth for step in filtered_steps) if filtered_steps else 0
+        new_flow.total_functions_called = len(set(step.entity_name for step in filtered_steps))
+        new_flow.variables_accessed = set()
+        new_flow.state_accessed = set()
+
+        for step in filtered_steps:
+            new_flow.variables_accessed.update(step.variables_in_scope)
+            new_flow.state_accessed.update(step.state_accessed)
+
+        return new_flow
+
+    def get_steps_at_depth(self, depth: int) -> List[ExecutionStep]:
+        """Get all execution steps at a specific depth.
+
+        Args:
+            depth: Call depth to retrieve
+
+        Returns:
+            List of steps at that depth
+
+        Example:
+            entry_points = flow.get_steps_at_depth(0)
+            first_level = flow.get_steps_at_depth(1)
+        """
+        return [step for step in self.steps if step.depth == depth]
+
+    def get_call_chain(self) -> List[str]:
+        """Get the execution call chain as a list of entity names.
+
+        Returns:
+            List of entity names in execution order
+
+        Example:
+            chain = flow.get_call_chain()
+            # ['Main', 'Processor', 'Transformer', 'Finalizer']
+        """
+        return [step.entity_name for step in self.steps]
 
 
 class ExecutionFlowTracer:
