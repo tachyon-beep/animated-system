@@ -33,7 +33,16 @@ from pyshort.core.ast_nodes import (
     TypeSpec,
     UnaryOp,
 )
-from pyshort.core.symbols import ENTITY_PREFIXES, normalize_operator
+from pyshort.core.symbols import (
+    DECORATOR_TAGS,
+    ENTITY_PREFIXES,
+    HTTP_METHODS,
+    is_complexity_tag,
+    is_decorator_tag,
+    is_http_method,
+    normalize_operator,
+    parse_http_route,
+)
 from pyshort.core.tokenizer import Token, TokenType, Tokenizer
 
 
@@ -294,40 +303,70 @@ class Parser:
         return dimensions
 
     def parse_tag(self) -> Tag:
-        """Parse a computational tag [Base:Qual1:Qual2]."""
+        """Parse a computational tag [Base:Qual1:Qual2].
+
+        Supports v1.4 tag types:
+        - [Lin:MatMul] - operation tags
+        - [O(N*M)] - complexity tags
+        - [Prop], [Static] - decorator tags
+        - [GET /path], [POST /api/users/{id}] - HTTP route tags
+        """
         self.expect(TokenType.LBRACKET)
 
-        parts = []
+        # Collect all content inside brackets
+        content = ""
         while self.current_token.type not in (TokenType.RBRACKET, TokenType.EOF):
-            if self.current_token.type == TokenType.IDENTIFIER:
-                parts.append(self.current_token.value)
-                self.advance()
-            elif self.current_token.type in (TokenType.GRADIENT, TokenType.TENSOR_OP):
-                parts.append(self.current_token.value)
-                self.advance()
-            else:
-                # Complex qualifier like O(N)
-                qual = ""
-                while self.current_token.type not in (TokenType.COLON, TokenType.RBRACKET, TokenType.EOF):
-                    qual += self.current_token.value
-                    self.advance()
-                if qual:
-                    parts.append(qual)
-
-            if self.current_token.type == TokenType.COLON:
-                self.advance()
+            content += self.current_token.value
+            self.advance()
+            # Add space if next token is identifier/word (for HTTP routes like "GET /path")
+            if (self.current_token.type == TokenType.IDENTIFIER and
+                content and not content.endswith(":")):
+                # Check if we should add space (for HTTP routes)
+                if content.split()[0] in HTTP_METHODS:
+                    content += " "
 
         if self.current_token.type == TokenType.EOF:
             raise ParseError("Unterminated tag, expected ']'", self.current_token)
         self.expect(TokenType.RBRACKET)
 
-        if not parts:
+        if not content:
             raise ParseError("Empty tag", self.current_token)
 
-        base = parts[0]
-        qualifiers = parts[1:] if len(parts) > 1 else []
+        # Strip whitespace
+        content = content.strip()
 
-        return Tag(base=base, qualifiers=qualifiers)
+        # Check for HTTP route tag: [GET /path], [POST /api/users/{id}]
+        route = parse_http_route(content)
+        if route:
+            method, path = route
+            return Tag(
+                base=content,
+                tag_type="http_route",
+                http_method=method,
+                http_path=path
+            )
+
+        # Check for complexity tag: [O(N)], [O(N*M*D)]
+        if is_complexity_tag(content):
+            return Tag(base=content, tag_type="complexity")
+
+        # Parse colon-separated parts for operation/decorator tags
+        parts = content.split(":")
+
+        # Check for decorator tag: [Prop], [Static], [Cached:TTL:60]
+        if is_decorator_tag(parts[0]):
+            return Tag(
+                base=parts[0],
+                qualifiers=parts[1:] if len(parts) > 1 else [],
+                tag_type="decorator"
+            )
+
+        # Default to operation tag: [Lin:MatMul], [Iter:Hot:O(N)]
+        return Tag(
+            base=parts[0],
+            qualifiers=parts[1:] if len(parts) > 1 else [],
+            tag_type="operation"
+        )
 
     def parse_expression(self) -> Expression:
         """Parse an expression."""
