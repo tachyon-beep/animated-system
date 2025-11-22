@@ -196,6 +196,7 @@ class Parser:
 
         Format: Type[Shape]@Location or Type[Shape]@Loc1→Loc2
         Or: [Ref:Name] for references
+        Or: Type1 | Type2 | Type3 for unions (P16)
         """
         # Handle reference types: [Ref:Name]
         if self.current_token.type == TokenType.LBRACKET:
@@ -205,9 +206,34 @@ class Parser:
                 # This is a reference type: [Ref:Name]
                 # Skip the entire reference as the "type"
                 ref_str = self.parse_reference_string()
-                return TypeSpec(base_type=ref_str, shape=None, location=None, transfer=None)
+
+                # Check for union with reference type
+                union_types = None
+                if self.current_token.type == TokenType.PIPE:
+                    union_types = [ref_str]
+                    while self.current_token.type == TokenType.PIPE:
+                        self.advance()  # Skip |
+                        # Next type could be another reference or a regular type
+                        if self.current_token.type == TokenType.LBRACKET:
+                            union_types.append(self.parse_reference_string())
+                        else:
+                            union_types.append(self.expect(TokenType.IDENTIFIER).value)
+
+                return TypeSpec(base_type=ref_str, shape=None, location=None, transfer=None, union_types=union_types)
 
         base_type = self.expect(TokenType.IDENTIFIER).value
+
+        # Check for union types (Type1 | Type2 | Type3)
+        union_types = None
+        if self.current_token.type == TokenType.PIPE:
+            union_types = [base_type]  # Start with the base type
+            while self.current_token.type == TokenType.PIPE:
+                self.advance()  # Skip |
+                # Next type could be a reference or a regular type
+                if self.current_token.type == TokenType.LBRACKET:
+                    union_types.append(self.parse_reference_string())
+                else:
+                    union_types.append(self.expect(TokenType.IDENTIFIER).value)
 
         shape = None
         if self.current_token.type == TokenType.LBRACKET:
@@ -227,7 +253,7 @@ class Parser:
             else:
                 location = loc1
 
-        return TypeSpec(base_type=base_type, shape=shape, location=location, transfer=transfer)
+        return TypeSpec(base_type=base_type, shape=shape, location=location, transfer=transfer, union_types=union_types)
 
     def parse_reference_string(self) -> str:
         """Parse a reference and return it as a string: [Ref:Name] → 'Ref:Name'."""

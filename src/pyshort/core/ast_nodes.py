@@ -99,10 +99,16 @@ class TypeSpec:
     shape: Optional[List[str]] = None  # [N, C, H, W]
     location: Optional[str] = None  # @CPU, @GPU, @Disk, @Net
     transfer: Optional[Tuple[str, str]] = None  # @CPU→GPU
+    union_types: Optional[List[str]] = None  # For Union types: [i32, str, f32]
 
     def __str__(self) -> str:
         """Format as PyShorthand notation."""
-        result = self.base_type
+        # Handle Union types
+        if self.union_types:
+            result = " | ".join(self.union_types)
+        else:
+            result = self.base_type
+
         if self.shape:
             result += f"[{', '.join(self.shape)}]"
         if self.transfer:
