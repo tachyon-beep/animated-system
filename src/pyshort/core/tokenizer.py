@@ -150,7 +150,18 @@ class Tokenizer:
 
     def read_number(self) -> str:
         """Read a numeric literal."""
-        num = self.read_while(lambda c: c.isdigit() or c == ".")
+        num = ""
+        has_decimal = False
+
+        # Read digits and at most one decimal point
+        while self.current_char() and (self.current_char().isdigit() or self.current_char() == "."):
+            if self.current_char() == ".":
+                if has_decimal:
+                    # Second decimal point - stop reading
+                    break
+                has_decimal = True
+            num += self.advance() or ""
+
         # Check for scientific notation
         if self.current_char() in ("e", "E"):
             num += self.advance() or ""
@@ -164,20 +175,34 @@ class Tokenizer:
         value = ""
         self.advance()  # Skip opening quote
 
+        # Escape sequence mapping
+        escape_map = {
+            "n": "\n",
+            "t": "\t",
+            "r": "\r",
+            "\\": "\\",
+            quote: quote
+        }
+
         while self.current_char() != quote:
             char = self.current_char()
             if char is None:
                 raise ValueError(f"Unterminated string at line {self.line}")
             if char == "\\":
-                self.advance()
+                self.advance()  # Skip the backslash
                 next_char = self.current_char()
-                if next_char in ("n", "t", "r", "\\", quote):
-                    value += self.advance() or ""
+                if next_char in escape_map:
+                    # Add the actual escaped character
+                    value += escape_map[next_char]
+                    self.advance()  # Move past the escape char
                 else:
-                    value += next_char or ""
+                    # Unknown escape sequence - keep backslash and char
+                    value += "\\" + (next_char or "")
+                    if next_char:
+                        self.advance()
             else:
                 value += char
-            self.advance()
+                self.advance()
 
         self.advance()  # Skip closing quote
         return value

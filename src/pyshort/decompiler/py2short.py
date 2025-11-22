@@ -108,7 +108,8 @@ class PyShorthandGenerator:
 
     def _extract_imports(self, tree: ast.Module):
         """Extract import statements and build import map."""
-        for node in ast.walk(tree):
+        # Only iterate module-level nodes, not nested scopes
+        for node in tree.body:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     module_name = alias.name
@@ -541,14 +542,15 @@ class PyShorthandGenerator:
         """
         # Number literals
         if isinstance(node, ast.Constant):
-            if isinstance(node.value, int):
+            # Check bool BEFORE int since bool is subclass of int in Python
+            if isinstance(node.value, bool):
+                return "bool"
+            elif isinstance(node.value, int):
                 return "i32"
             elif isinstance(node.value, float):
                 return "f32"
             elif isinstance(node.value, str):
                 return "str"
-            elif isinstance(node.value, bool):
-                return "bool"
 
         # List literal
         if isinstance(node, ast.List):

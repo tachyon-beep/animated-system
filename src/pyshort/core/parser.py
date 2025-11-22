@@ -204,12 +204,14 @@ class Parser:
         """Parse a reference and return it as a string: [Ref:Name] → 'Ref:Name'."""
         self.expect(TokenType.LBRACKET)
         ref_parts = []
-        while self.current_token.type != TokenType.RBRACKET:
+        while self.current_token.type not in (TokenType.RBRACKET, TokenType.EOF):
             if self.current_token.type in (TokenType.IDENTIFIER, TokenType.COLON):
                 ref_parts.append(self.current_token.value)
                 self.advance()
             else:
                 self.advance()  # Skip other tokens
+        if self.current_token.type == TokenType.EOF:
+            raise ParseError("Unterminated reference, expected ']'", self.current_token)
         self.expect(TokenType.RBRACKET)
         return "".join(ref_parts)
 
@@ -218,20 +220,21 @@ class Parser:
         self.expect(TokenType.LBRACKET)
         dimensions = []
 
-        while self.current_token.type != TokenType.RBRACKET:
+        while self.current_token.type not in (TokenType.RBRACKET, TokenType.EOF):
             if self.current_token.type == TokenType.IDENTIFIER:
                 dimensions.append(self.current_token.value)
                 self.advance()
             elif self.current_token.type == TokenType.NUMBER:
                 dimensions.append(self.current_token.value)
                 self.advance()
+            elif self.current_token.type == TokenType.COMMA:
+                self.advance()
             else:
                 raise ParseError(f"Unexpected token in shape: {self.current_token.value}",
                                self.current_token)
 
-            if self.current_token.type == TokenType.COMMA:
-                self.advance()
-
+        if self.current_token.type == TokenType.EOF:
+            raise ParseError("Unterminated shape specification, expected ']'", self.current_token)
         self.expect(TokenType.RBRACKET)
         return dimensions
 
@@ -240,7 +243,7 @@ class Parser:
         self.expect(TokenType.LBRACKET)
 
         parts = []
-        while self.current_token.type != TokenType.RBRACKET:
+        while self.current_token.type not in (TokenType.RBRACKET, TokenType.EOF):
             if self.current_token.type == TokenType.IDENTIFIER:
                 parts.append(self.current_token.value)
                 self.advance()
@@ -250,7 +253,7 @@ class Parser:
             else:
                 # Complex qualifier like O(N)
                 qual = ""
-                while self.current_token.type not in (TokenType.COLON, TokenType.RBRACKET):
+                while self.current_token.type not in (TokenType.COLON, TokenType.RBRACKET, TokenType.EOF):
                     qual += self.current_token.value
                     self.advance()
                 if qual:
@@ -259,6 +262,8 @@ class Parser:
             if self.current_token.type == TokenType.COLON:
                 self.advance()
 
+        if self.current_token.type == TokenType.EOF:
+            raise ParseError("Unterminated tag, expected ']'", self.current_token)
         self.expect(TokenType.RBRACKET)
 
         if not parts:
@@ -362,13 +367,15 @@ class Parser:
         self.expect(TokenType.LBRACKET)
         indices = []
 
-        while self.current_token.type != TokenType.RBRACKET:
+        while self.current_token.type not in (TokenType.RBRACKET, TokenType.EOF):
             indices.append(self.parse_expression())
             if self.current_token.type == TokenType.COMMA:
                 self.advance()
-            elif self.current_token.type != TokenType.RBRACKET:
+            elif self.current_token.type not in (TokenType.RBRACKET, TokenType.EOF):
                 break
 
+        if self.current_token.type == TokenType.EOF:
+            raise ParseError("Unterminated array indexing, expected ']'", self.current_token)
         self.expect(TokenType.RBRACKET)
 
         # Return IndexOp expression
@@ -393,11 +400,16 @@ class Parser:
         self.expect(TokenType.LPAREN)
         args = []
 
-        while self.current_token.type != TokenType.RPAREN:
+        while self.current_token.type not in (TokenType.RPAREN, TokenType.EOF):
             args.append(self.parse_expression())
             if self.current_token.type == TokenType.COMMA:
                 self.advance()
+            elif self.current_token.type not in (TokenType.RPAREN, TokenType.EOF):
+                # Expected comma or closing paren
+                break
 
+        if self.current_token.type == TokenType.EOF:
+            raise ParseError(f"Unterminated function call '{name}', expected ')'", self.current_token)
         self.expect(TokenType.RPAREN)
         return FunctionCall(function=name, args=args)
 
@@ -809,7 +821,7 @@ class Parser:
         dependencies = []
         if self.current_token.type == TokenType.LBRACKET:
             # Dependencies line like: ◊ [Ref:A], [Ref:B]
-            while self.current_token.type != TokenType.NEWLINE:
+            while self.current_token.type not in (TokenType.NEWLINE, TokenType.EOF):
                 if self.current_token.type == TokenType.LBRACKET:
                     self.advance()
                     if self.current_token.value == "Ref":

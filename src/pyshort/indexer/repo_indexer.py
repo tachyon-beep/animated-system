@@ -120,7 +120,8 @@ class RepositoryIndexer:
         try:
             tree = ast.parse(source)
 
-            for node in ast.walk(tree):
+            # Only iterate module-level nodes, not nested scopes
+            for node in tree.body:
                 if isinstance(node, ast.Import):
                     for alias in node.names:
                         imports.add(alias.name.split('.')[0])
@@ -141,7 +142,8 @@ class RepositoryIndexer:
         try:
             tree = ast.parse(source)
 
-            for node in ast.walk(tree):
+            # Only iterate module-level nodes, not nested scopes
+            for node in tree.body:
                 if isinstance(node, ast.ClassDef):
                     entity = EntityInfo(
                         name=node.name,
@@ -173,7 +175,7 @@ class RepositoryIndexer:
 
                     entities.append(entity)
 
-                elif isinstance(node, ast.FunctionDef) and isinstance(node, ast.Module):
+                elif isinstance(node, ast.FunctionDef):
                     # Top-level functions
                     entity = EntityInfo(
                         name=node.name,
@@ -302,6 +304,13 @@ class RepositoryIndexer:
 
     def save_index(self, output_path: str):
         """Save index to JSON file."""
+        # Helper function to convert EntityInfo to dict with sets as lists
+        def entity_to_dict(entity: EntityInfo) -> dict:
+            entity_dict = asdict(entity)
+            # Convert set to list for JSON serialization
+            entity_dict['dependencies'] = list(entity_dict['dependencies'])
+            return entity_dict
+
         # Convert to serializable format
         data = {
             'root_path': self.index.root_path,
@@ -309,7 +318,7 @@ class RepositoryIndexer:
                 path: {
                     'module_path': info.module_path,
                     'file_path': info.file_path,
-                    'entities': [asdict(e) for e in info.entities],
+                    'entities': [entity_to_dict(e) for e in info.entities],
                     'imports': list(info.imports),
                     'line_count': info.line_count,
                 }
@@ -320,12 +329,6 @@ class RepositoryIndexer:
             },
             'statistics': self.index.statistics,
         }
-
-        # Convert sets to lists for JSON serialization
-        for module in data['modules'].values():
-            for entity in module['entities']:
-                if 'dependencies' in entity and isinstance(entity['dependencies'], set):
-                    entity['dependencies'] = list(entity['dependencies'])
 
         with open(output_path, 'w') as f:
             json.dump(data, f, indent=2)
