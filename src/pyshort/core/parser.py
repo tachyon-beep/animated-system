@@ -315,15 +315,17 @@ class Parser:
 
         # Collect all content inside brackets
         content = ""
+        prev_token_type = None
         while self.current_token.type not in (TokenType.RBRACKET, TokenType.EOF):
+            # Add space before slash if previous token was an HTTP method
+            if (self.current_token.type == TokenType.SLASH and
+                prev_token_type == TokenType.IDENTIFIER and
+                content in HTTP_METHODS):
+                content += " "
+
             content += self.current_token.value
+            prev_token_type = self.current_token.type
             self.advance()
-            # Add space if next token is identifier/word (for HTTP routes like "GET /path")
-            if (self.current_token.type == TokenType.IDENTIFIER and
-                content and not content.endswith(":")):
-                # Check if we should add space (for HTTP routes)
-                if content.split()[0] in HTTP_METHODS:
-                    content += " "
 
         if self.current_token.type == TokenType.EOF:
             raise ParseError("Unterminated tag, expected ']'", self.current_token)
