@@ -4,6 +4,7 @@ This module provides lexical analysis for PyShorthand files,
 breaking input text into a stream of tokens.
 """
 
+import warnings
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Iterator, List, Optional
@@ -149,7 +150,7 @@ class Tokenizer:
         return self.read_while(lambda c: c.isalnum() or c in ("_", "-"))
 
     def read_number(self) -> str:
-        """Read a numeric literal."""
+        """Read a numeric literal with range validation."""
         num = ""
         has_decimal = False
 
@@ -168,7 +169,62 @@ class Tokenizer:
             if self.current_char() in ("+", "-"):
                 num += self.advance() or ""
             num += self.read_while(lambda c: c.isdigit())
+
+        # Validate numeric range (P23)
+        self._validate_numeric_range(num, has_decimal)
+
         return num
+
+    def _validate_numeric_range(self, num_str: str, is_float: bool) -> None:
+        """Validate that numeric literal is within reasonable range.
+
+        Args:
+            num_str: The numeric string
+            is_float: True if number has decimal point or scientific notation
+        """
+        try:
+            if is_float or 'e' in num_str.lower():
+                # Float validation
+                value = float(num_str)
+
+                # Check for infinity (number too large for f64)
+                if value == float('inf') or value == float('-inf'):
+                    warnings.warn(
+                        f"Float literal '{num_str}' at line {self.line} exceeds f64 range, will be represented as infinity",
+                        SyntaxWarning
+                    )
+                # Warn if exceeds f32 range but not f64
+                elif abs(value) > 3.4e38:
+                    warnings.warn(
+                        f"Float literal '{num_str}' at line {self.line} exceeds f32 range (max ±3.4e38), requires f64",
+                        SyntaxWarning
+                    )
+            else:
+                # Integer validation
+                value = int(num_str)
+
+                # Check if exceeds i64 range
+                I64_MAX = 9223372036854775807  # 2^63 - 1
+                I64_MIN = -9223372036854775808  # -2^63
+
+                if value > I64_MAX or value < I64_MIN:
+                    warnings.warn(
+                        f"Integer literal '{num_str}' at line {self.line} exceeds i64 range ({I64_MIN} to {I64_MAX})",
+                        SyntaxWarning
+                    )
+                # Warn if exceeds i32 range but fits in i64
+                elif value > 2147483647 or value < -2147483648:
+                    warnings.warn(
+                        f"Integer literal '{num_str}' at line {self.line} exceeds i32 range, requires i64",
+                        SyntaxWarning
+                    )
+
+        except (ValueError, OverflowError):
+            # Number is malformed or too large to even parse
+            warnings.warn(
+                f"Numeric literal '{num_str}' at line {self.line} is malformed or extremely large",
+                SyntaxWarning
+            )
 
     def read_string(self, quote: str) -> str:
         """Read a string literal."""
@@ -181,7 +237,12 @@ class Tokenizer:
             "t": "\t",
             "r": "\r",
             "\\": "\\",
-            quote: quote
+            quote: quote,
+            "0": "\0",  # Null character
+            "a": "\a",  # Bell/alert
+            "b": "\b",  # Backspace
+            "f": "\f",  # Form feed
+            "v": "\v",  # Vertical tab
         }
 
         while self.current_char() != quote:
@@ -195,16 +256,87 @@ class Tokenizer:
                     # Add the actual escaped character
                     value += escape_map[next_char]
                     self.advance()  # Move past the escape char
-                else:
-                    # Unknown escape sequence - keep backslash and char
+                elif next_char and next_char.isdigit():
+                    # Octal escape sequence (e.g., \123) - treat as literal for now
+                    warnings.warn(
+                        f"Octal escape sequence '\\{next_char}' at line {self.line} not supported, treating as literal",
+                        SyntaxWarning
+                    )
+                    value += "\\" + next_char
+                    self.advance()
+                elif next_char == 'x':
+                    # Hex escape sequence (e.g., \x41) - treat as literal for now
+                    warnings.warn(
+                        f"Hex escape sequence '\\x' at line {self.line} not supported, treating as literal",
+                        SyntaxWarning
+                    )
+                    value += "\\x"
+                    self.advance()
+                elif next_char == 'u' or next_char == 'U':
+                    # Unicode escape sequence - treat as literal for now
+                    warnings.warn(
+                        f"Unicode escape sequence '\\{next_char}' at line {self.line} not supported, treating as literal",
+                        SyntaxWarning
+                    )
                     value += "\\" + (next_char or "")
                     if next_char:
                         self.advance()
+                else:
+                    # Unknown escape sequence - warn and keep literal
+                    if next_char:
+                        warnings.warn(
+                            f"Unknown escape sequence '\\{next_char}' at line {self.line}, treating as literal",
+                            SyntaxWarning
+                        )
+                        value += "\\" + next_char
+                        self.advance()
+                    else:
+                        value += "\\"
             else:
                 value += char
                 self.advance()
 
         self.advance()  # Skip closing quote
+        return value
+
+    def read_multiline_string(self, quote: str) -> str:
+        """Read a multiline (triple-quoted) string literal.
+
+        Args:
+            quote: The quote character (either " or ')
+
+        Returns:
+            The string content (without the triple quotes)
+        """
+        value = ""
+
+        # Skip opening triple quotes
+        self.advance()  # First quote
+        self.advance()  # Second quote
+        self.advance()  # Third quote
+
+        # Build the closing sequence we're looking for
+        closing = quote * 3
+
+        # Read until we find the closing triple quotes
+        while True:
+            char = self.current_char()
+
+            if char is None:
+                raise ValueError(f"Unterminated multiline string at line {self.line}")
+
+            # Check if we've reached the closing triple quotes
+            if char == quote and self.peek_char() == quote and self.peek_char(2) == quote:
+                # Found closing quotes - skip them and return
+                self.advance()  # First closing quote
+                self.advance()  # Second closing quote
+                self.advance()  # Third closing quote
+                break
+
+            # Otherwise, add the character (including newlines)
+            value += char
+            self.advance()
+
         return value
 
     def tokenize(self) -> List[Token]:
@@ -250,10 +382,15 @@ class Tokenizer:
                 self.tokens.append(Token(TokenType.NUMBER, num, line, col))
                 continue
 
-            # Strings
+            # Strings (check for triple-quoted strings first)
             if char in ('"', "'"):
-                string_val = self.read_string(char)
-                self.tokens.append(Token(TokenType.STRING, string_val, line, col))
+                # Check for triple-quoted string
+                if self.peek_char() == char and self.peek_char(2) == char:
+                    string_val = self.read_multiline_string(char)
+                    self.tokens.append(Token(TokenType.STRING, string_val, line, col))
+                else:
+                    string_val = self.read_string(char)
+                    self.tokens.append(Token(TokenType.STRING, string_val, line, col))
                 continue
 
             # Multi-character operators
