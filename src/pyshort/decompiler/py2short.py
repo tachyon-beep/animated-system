@@ -176,6 +176,12 @@ class PyShorthandGenerator:
     def _generate_entity(self, cls: ast.ClassDef, tree: ast.Module) -> List[str]:
         """Generate PyShorthand entity from Python class.
 
+        v1.5 enhancements:
+        - Extract base classes as inheritance (◊ notation)
+        - Detect abstract classes ([Abstract] tag)
+        - Detect Protocol classes ([P:Name] prefix)
+        - Extract generic parameters from typing (e.g., Generic[T])
+
         Args:
             cls: Python ClassDef node
             tree: Module AST (for context)
@@ -191,8 +197,25 @@ class PyShorthandGenerator:
         is_fastapi_route = self._is_fastapi_route_class(cls)
         web_framework = self._detect_web_framework(cls)
 
-        # Entity header with pattern annotations
-        header = f"[C:{cls.name}]"
+        # v1.5: Detect abstract and protocol classes
+        is_abstract = self._is_abstract_class(cls)
+        is_protocol = self._is_protocol_class(cls)
+        generic_params = self._extract_generic_params(cls)
+
+        # v1.5: Use P: prefix for protocols
+        prefix = "P" if is_protocol else "C"
+
+        # Entity header with optional generic parameters
+        if generic_params:
+            header = f"[{prefix}:{cls.name}<{', '.join(generic_params)}>]"
+        else:
+            header = f"[{prefix}:{cls.name}]"
+
+        # v1.5: Add [Abstract] tag if applicable
+        if is_abstract and not is_protocol:
+            header += " [Abstract]"
+
+        # Add pattern annotations as comments
         if is_dataclass:
             header += " # @dataclass"
         elif is_pydantic:
@@ -201,11 +224,11 @@ class PyShorthandGenerator:
             header += f" # {web_framework}"
         lines.append(header)
 
-        # Extract dependencies from base classes
-        dependencies = self._extract_class_dependencies(cls)
+        # v1.5: Extract inheritance (◊ Base1, Base2)
+        base_classes = self._extract_base_classes(cls)
 
-        if dependencies:
-            lines.append(f"  ◊ {', '.join(dependencies)}")
+        if base_classes:
+            lines.append(f"  ◊ {', '.join(base_classes)}")
 
         # Extract class attributes with type hints
         state_vars = self._extract_state_variables(cls, is_dataclass or is_pydantic)
@@ -273,6 +296,120 @@ class PyShorthandGenerator:
                         dependencies.append(f"[Ref:{dep_name}]")
 
         return dependencies
+
+    def _extract_base_classes(self, cls: ast.ClassDef) -> List[str]:
+        """Extract base classes for v1.5 inheritance notation.
+
+        Args:
+            cls: Python ClassDef node
+
+        Returns:
+            List of base class names (e.g., ['nn.Module', 'ABC'])
+        """
+        bases = []
+
+        for base in cls.bases:
+            base_name = None
+
+            if isinstance(base, ast.Name):
+                base_name = base.id
+            elif isinstance(base, ast.Attribute):
+                # Handle nn.Module, abc.ABC, etc.
+                parts = []
+                current = base
+                while isinstance(current, ast.Attribute):
+                    parts.insert(0, current.attr)
+                    current = current.value
+                if isinstance(current, ast.Name):
+                    parts.insert(0, current.id)
+                base_name = '.'.join(parts)
+            elif isinstance(base, ast.Subscript):
+                # Handle Generic[T], Protocol[T], etc. - skip these
+                # Generic/Protocol are handled separately
+                continue
+
+            if base_name and base_name not in ('Generic', 'Protocol'):
+                # Filter out ABC if already marked as abstract
+                if base_name not in ('ABC', 'abc.ABC') or not self._is_abstract_class(cls):
+                    bases.append(base_name)
+
+        return bases
+
+    def _is_abstract_class(self, cls: ast.ClassDef) -> bool:
+        """Check if class is abstract (v1.5).
+
+        Args:
+            cls: Python ClassDef node
+
+        Returns:
+            True if class inherits from ABC or has abstractmethod decorators
+        """
+        # Check if inherits from ABC
+        for base in cls.bases:
+            if isinstance(base, ast.Name) and base.id in ('ABC',):
+                return True
+            elif isinstance(base, ast.Attribute):
+                # Check for abc.ABC
+                if base.attr == 'ABC':
+                    return True
+
+        # Check for @abstractmethod decorators
+        for node in cls.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for dec in node.decorator_list:
+                    if isinstance(dec, ast.Name) and 'abstract' in dec.id.lower():
+                        return True
+                    elif isinstance(dec, ast.Attribute) and 'abstract' in dec.attr.lower():
+                        return True
+
+        return False
+
+    def _is_protocol_class(self, cls: ast.ClassDef) -> bool:
+        """Check if class is a Protocol (v1.5).
+
+        Args:
+            cls: Python ClassDef node
+
+        Returns:
+            True if class inherits from Protocol
+        """
+        for base in cls.bases:
+            if isinstance(base, ast.Name) and base.id == 'Protocol':
+                return True
+            elif isinstance(base, ast.Attribute) and base.attr == 'Protocol':
+                return True
+            elif isinstance(base, ast.Subscript):
+                # Handle Protocol[T]
+                if isinstance(base.value, ast.Name) and base.value.id == 'Protocol':
+                    return True
+
+        return False
+
+    def _extract_generic_params(self, cls: ast.ClassDef) -> List[str]:
+        """Extract generic type parameters from class (v1.5).
+
+        Args:
+            cls: Python ClassDef node
+
+        Returns:
+            List of generic parameter names (e.g., ['T', 'U'])
+        """
+        for base in cls.bases:
+            if isinstance(base, ast.Subscript):
+                # Check if this is Generic[T] or Generic[T, U]
+                if isinstance(base.value, ast.Name) and base.value.id == 'Generic':
+                    params = []
+                    if isinstance(base.slice, ast.Tuple):
+                        # Generic[T, U, V]
+                        for elt in base.slice.elts:
+                            if isinstance(elt, ast.Name):
+                                params.append(elt.id)
+                    elif isinstance(base.slice, ast.Name):
+                        # Generic[T]
+                        params.append(base.slice.id)
+                    return params
+
+        return []
 
     def _is_dataclass(self, cls: ast.ClassDef) -> bool:
         """Check if class is a dataclass."""
