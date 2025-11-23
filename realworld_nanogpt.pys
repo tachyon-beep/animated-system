@@ -1,6 +1,6 @@
 # [M:Full definition of a GPT Language Model, all of it in this single file] [Role:Core]
 
-[C:LayerNorm]
+[C:LayerNorm] ◊ nn.Module
   weight ∈ Unknown
   bias ∈ Unknown
 
@@ -8,7 +8,7 @@
   # F:__init__(ndim, bias) → Unknown
   # F:forward(input) → Unknown [O(1)]
 
-[C:CausalSelfAttention]
+[C:CausalSelfAttention] ◊ nn.Module
   c_attn ∈ Linear
   c_proj ∈ Linear
   attn_dropout ∈ Dropout
@@ -21,7 +21,7 @@
   # F:__init__(config) → Unknown
   # F:forward(x) → Unknown
 
-[C:MLP]
+[C:MLP] ◊ nn.Module
   c_fc ∈ Linear
   gelu ∈ Unknown
   c_proj ∈ Linear
@@ -31,7 +31,7 @@
   # F:__init__(config) → Unknown
   # F:forward(x) → Unknown
 
-[C:Block]
+[C:Block] ◊ nn.Module
   ln_1 ∈ [Ref:LayerNorm]
   attn ∈ [Ref:CausalSelfAttention]
   ln_2 ∈ [Ref:LayerNorm]
@@ -50,7 +50,7 @@
   dropout ∈ f32  # default: 0.0
   bias ∈ bool  # default: True
 
-[C:GPT]
+[C:GPT] ◊ nn.Module
   config ∈ Unknown
   transformer ∈ Unknown
   lm_head ∈ Linear
