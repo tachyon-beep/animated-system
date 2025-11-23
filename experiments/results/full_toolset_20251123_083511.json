@@ -1,0 +1,130 @@
+[
+  {
+    "question_id": 1,
+    "question": "How many classes are in the codebase and what do they inherit from?",
+    "answer": "There are six classes in total. Five of them (LayerNorm, CausalSelfAttention, MLP, Block, and GPT) inherit from nn.Module. The remaining class (GPTConfig) is defined as a dataclass (so it effectively inherits from Python\u2019s object).",
+    "tools_used": [
+      "get_module_pyshorthand()"
+    ],
+    "total_tokens": 2940,
+    "iterations": 2,
+    "expected_tools": [
+      "get_module_pyshorthand"
+    ],
+    "complexity": "simple_structural"
+  },
+  {
+    "question_id": 2,
+    "question": "What are all the methods in the GPT class and what are their signatures?",
+    "answer": "Below are the methods that appear in the \u201cGPT\u201d class, along with their argument signatures (as best as can be discerned from the PyShorthand summary):\n\n1. __init__(config)\n   Initializes the GPT model with the given configuration.\n\n2. get_num_params(non_embedding)\n   Returns the number of parameters in the model, optionally excluding embeddings.\n\n3. forward(idx, targets)\n   Performs the forward pass given \u201cidx\u201d (token indices) and optional \u201ctargets\u201d for training.\n\n4. crop_block_size(block_size)\n   Adjusts (crops) the model\u2019s maximum context size to \u201cblock_size.\u201d\n\n5. @classmethod\n   from_pretrained(model_type, override_args)\n   Loads a GPT model from a pretrained checkpoint, overriding arguments as specified.\n\n6. configure_optimizers(weight_decay, learning_rate, betas, device_type)\n   Configures the optimizer hyperparameters (weight decay, LR, betas) for a given device type.\n\n7. estimate_mfu(fwdbwd_per_iter, dt)\n   Estimates the model\u2019s \u201cMFU\u201d (Machine-Fraction-Utilization) based on forward/backward passes and timing.\n\n8. generate(idx, max_new_tokens, temperature, top_k)\n   Generates up to \u201cmax_new_tokens\u201d new tokens from an initial \u201cidx,\u201d controlling randomness via \u201ctemperature\u201d and \u201ctop_k.\u201d",
+    "tools_used": [
+      "get_class_pyshorthand(\"GPT\")"
+    ],
+    "total_tokens": 3154,
+    "iterations": 2,
+    "expected_tools": [
+      "get_class_pyshorthand",
+      "get_class_details"
+    ],
+    "complexity": "single_class_structural"
+  },
+  {
+    "question_id": 3,
+    "question": "If I modify CausalSelfAttention, what other classes might be affected?",
+    "answer": "From the module structure, the only direct user of CausalSelfAttention is the Block class (it has an \u201cattn\u201d field referencing it). Because GPT is composed of Blocks, changes to CausalSelfAttention will also indirectly affect GPT. So the main classes potentially impacted are Block (directly) and GPT (indirectly).",
+    "tools_used": [
+      "get_context_pack(CausalSelfAttention, max_depth=2)",
+      "get_neighbors(CausalSelfAttention)",
+      "search_usage(CausalSelfAttention)",
+      "get_module_pyshorthand()"
+    ],
+    "total_tokens": 6057,
+    "iterations": 5,
+    "expected_tools": [
+      "get_context_pack",
+      "search_usage"
+    ],
+    "complexity": "dependency_analysis"
+  },
+  {
+    "question_id": 4,
+    "question": "Trace the execution flow when GPT.forward() is called - what gets executed in what order?",
+    "answer": "When GPT.forward() is called, it looks up device/shape info, creates a position tensor, computes token+pos embeddings, applies a dropout, loops through each Block (which applies LayerNorm, self-attention, MLP, etc.), applies the final LayerNorm, then finally applies the lm_head. If targets are provided, it also computes the cross-entropy loss; otherwise, it just returns the last-step logits and no loss.",
+    "tools_used": [
+      "trace_execution(GPT.forward, max_depth=10)",
+      "get_module_pyshorthand()",
+      "get_implementation(GPT.forward)"
+    ],
+    "total_tokens": 7759,
+    "iterations": 4,
+    "expected_tools": [
+      "trace_execution"
+    ],
+    "complexity": "execution_flow"
+  },
+  {
+    "question_id": 5,
+    "question": "How does the Block class implement residual connections? Show the exact code.",
+    "answer": "Here is the exact forward method from the Block class, showing the two residual connections using the output of self.attn and self.mlp:\n\ndef forward(self, x):\n    x = x + self.attn(self.ln_1(x))\n    x = x + self.mlp(self.ln_2(x))\n    return x",
+    "tools_used": [
+      "get_implementation(Block.forward)"
+    ],
+    "total_tokens": 2460,
+    "iterations": 2,
+    "expected_tools": [
+      "get_implementation"
+    ],
+    "complexity": "implementation_detail"
+  },
+  {
+    "question_id": 6,
+    "question": "What classes directly depend on LayerNorm and what depends on those?",
+    "answer": "\u2022 The only class that directly depends on LayerNorm is Block (it has ln_1 and ln_2 as LayerNorm).  \n\u2022 Nothing in this code references Block, so there are no further dependents of Block.",
+    "tools_used": [
+      "get_context_pack(LayerNorm, max_depth=2)",
+      "search_usage(\"LayerNorm\")",
+      "get_module_pyshorthand()",
+      "search_usage(\"Block\")"
+    ],
+    "total_tokens": 7406,
+    "iterations": 5,
+    "expected_tools": [
+      "get_context_pack",
+      "search_usage"
+    ],
+    "complexity": "multi_hop_dependency"
+  },
+  {
+    "question_id": 7,
+    "question": "What is the complete structure of the transformer ModuleDict in GPT?",
+    "answer": "Within GPT, self.transformer is defined as an nn.ModuleDict containing:\n\n\u2022 \"wte\": nn.Embedding(config.vocab_size, config.n_embd)  \n\u2022 \"wpe\": nn.Embedding(config.block_size, config.n_embd)  \n\u2022 \"drop\": nn.Dropout(config.dropout)  \n\u2022 \"h\": nn.ModuleList([Block(config) for _ in range(config.n_layer)])  \n\u2022 \"ln_f\": LayerNorm(config.n_embd, bias=config.bias)\n\nHence the full structure of the transformer ModuleDict is:\n\nnn.ModuleDict({\n  \"wte\": Embedding,\n  \"wpe\": Embedding,\n  \"drop\": Dropout,\n  \"h\": ModuleList of Block modules,\n  \"ln_f\": LayerNorm\n})",
+    "tools_used": [
+      "get_class_pyshorthand(GPT)",
+      "get_implementation(GPT.__init__)"
+    ],
+    "total_tokens": 5114,
+    "iterations": 3,
+    "expected_tools": [
+      "get_class_details",
+      "get_class_pyshorthand"
+    ],
+    "complexity": "nested_structure"
+  },
+  {
+    "question_id": 8,
+    "question": "How does n_head flow from GPTConfig through the architecture? Which classes use it and how?",
+    "answer": "From the PyShorthand structure, the data flow is:\n\n\u2022 GPTConfig holds n_head as a simple integer field.  \n\u2022 When constructing the model, each Block is given the GPTConfig.  \n\u2022 The Block creates a CausalSelfAttention instance, passing in config.  \n\u2022 Inside CausalSelfAttention.__init__, self.n_head is set from config.n_head.  \n\nPractically, only CausalSelfAttention uses n_head for multi-head attention. The Block just passes config along; it does not directly manipulate n_head itself.  ",
+    "tools_used": [
+      "search_usage(\"n_head\")",
+      "get_module_pyshorthand()"
+    ],
+    "total_tokens": 4351,
+    "iterations": 3,
+    "expected_tools": [
+      "get_context_pack",
+      "get_class_details",
+      "get_implementation"
+    ],
+    "complexity": "cross_file_parameter_trace"
+  }
+]
