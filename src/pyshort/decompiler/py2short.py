@@ -6,6 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+# Complexity mapping for loop depth to Big-O notation
+COMPLEXITY_MAP = {
+    1: "[O(N)]",
+    2: "[O(N²)]",
+    3: "[O(N³)]",
+}
+
+
 @dataclass
 class InferredType:
     """Type inference result with confidence."""
@@ -859,13 +867,8 @@ class PyShorthandGenerator:
 
         # Pattern-based complexity detection
         loop_depth = self._calculate_loop_depth(func)
-        complexity_map = {
-            1: "[O(N)]",
-            2: "[O(N²)]",
-            3: "[O(N³)]",
-        }
-        if loop_depth in complexity_map:
-            return complexity_map[loop_depth]
+        if loop_depth in COMPLEXITY_MAP:
+            return COMPLEXITY_MAP[loop_depth]
 
         # Default for simple functions
         if loop_depth == 0:
