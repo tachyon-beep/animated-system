@@ -200,6 +200,60 @@ class Parser:
             custom={k: v for k, v in metadata_dict.items() if k not in Metadata.__annotations__},
         )
 
+    def _is_v14_tag(self) -> bool:
+        """Check if current bracket is a v1.4 tag (not a shape parameter).
+
+        Returns True if the bracket content looks like:
+        - Decorator tag: Prop, Static, Class, Cached, Auth, etc.
+        - HTTP route tag: GET /path, POST /api, etc.
+        - Complexity tag: O(N), O(N²), etc.
+        - Operation tag: NN:∇, Lin:MatMul, IO:Disk, etc.
+        - Custom tag with qualifiers
+        """
+        if self.current_token.type != TokenType.LBRACKET:
+            return False
+
+        # Save current position
+        saved_pos = self.pos
+        saved_token = self.current_token
+
+        try:
+            self.advance()  # Skip [
+
+            if self.current_token.type == TokenType.EOF or self.current_token.type == TokenType.RBRACKET:
+                return False
+
+            first_token = self.current_token.value if self.current_token.type == TokenType.IDENTIFIER else ""
+
+            # Decorator tags
+            if first_token in ('Prop', 'Static', 'Class', 'Cached', 'Auth', 'Async', 'Pure', 'Safe'):
+                return True
+
+            # HTTP methods (route tags)
+            if first_token in ('GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'):
+                return True
+
+            # Complexity tags: O(...)
+            if first_token == 'O' and self.peek() and self.peek().type == TokenType.LPAREN:
+                return True
+
+            # Operation tags: NN, Lin, IO, Iter, Sync
+            if first_token in ('NN', 'Lin', 'IO', 'Iter', 'Sync'):
+                return True
+
+            # Check for qualifiers (colon after first token suggests tag, not shape)
+            if self.peek() and self.peek().type == TokenType.COLON:
+                return True
+
+            # If it's a single identifier with no comma, could be either shape or tag
+            # Default to shape for backward compatibility, unless it matches known patterns
+            return False
+
+        finally:
+            # Restore position
+            self.pos = saved_pos
+            self.current_token = saved_token
+
     def parse_type_spec(self) -> TypeSpec:
         """Parse type specification.
 
@@ -246,7 +300,9 @@ class Parser:
 
         shape = None
         if self.current_token.type == TokenType.LBRACKET:
-            shape = self.parse_shape()
+            # Check if this bracket is a shape or a v1.4 tag
+            if not self._is_v14_tag():
+                shape = self.parse_shape()
 
         location = None
         transfer = None

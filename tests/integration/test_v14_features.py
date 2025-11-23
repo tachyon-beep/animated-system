@@ -17,7 +17,7 @@ class TestV14EndToEnd:
     def test_decorator_tag_workflow(self):
         """Test complete workflow with decorator tags."""
         source = """# [M:TestModule]
-# F:device() → str [Prop]
+F:device() → str [Prop]
 """
         # Parse
         ast = parse_string(source)
@@ -38,7 +38,7 @@ class TestV14EndToEnd:
     def test_http_route_tag_workflow(self):
         """Test complete workflow with HTTP route tags."""
         source = """# [M:API]
-# F:get_user(id: i32) → User [GET/users/{id}]
+F:get_user(id: i32) → User [GET/users/{id}]
 """
         # Parse
         ast = parse_string(source)
@@ -62,7 +62,7 @@ class TestV14EndToEnd:
     def test_complexity_tag_workflow(self):
         """Test complete workflow with complexity tags."""
         source = """# [M:Algorithms]
-# F:process(data: List) → Result [O(N*M)]
+F:process(data: List) → Result [O(N*M)]
 """
         # Parse
         ast = parse_string(source)
@@ -85,7 +85,7 @@ class TestV14EndToEnd:
     def test_combined_tags_workflow(self):
         """Test complete workflow with all tag types combined."""
         source = """# [M:NeuralNet]
-# F:forward(x: Tensor) → Tensor [Prop] [GET/api/forward] [NN:∇:Lin:MatMul] [O(B*N*D)]
+F:forward(x: Tensor) → Tensor [Prop] [GET/api/forward] [NN:∇:Lin:MatMul] [O(B*N*D)]
 """
         # Parse
         ast = parse_string(source)
@@ -123,7 +123,7 @@ class TestV14EndToEnd:
     def test_validator_catches_conflicts(self):
         """Test that validator catches v1.4 tag conflicts."""
         source = """# [M:Test]
-# F:bad_function() → None [Prop] [Static]
+F:bad_function() → None [Prop] [Static]
 """
         # Parse
         ast = parse_string(source)
@@ -138,7 +138,7 @@ class TestV14EndToEnd:
     def test_validator_catches_invalid_rate_limit(self):
         """Test that validator catches invalid rate limit."""
         source = """# [M:Test]
-# F:limited() → None [RateLimit:-1]
+F:limited() → None [RateLimit:-1]
 """
         # Parse
         ast = parse_string(source)
@@ -153,7 +153,7 @@ class TestV14EndToEnd:
     def test_roundtrip_preserves_tags(self):
         """Test that parse → format → parse preserves all tag information."""
         original = """# [M:TestModule]
-# F:api_call(x: i32) → str [Auth] [POST/api/call] [IO:Net] [O(1)]
+F:api_call(x: i32) → str [Auth] [POST/api/call] [IO:Net] [O(1)]
 """
         # First parse
         ast1 = parse_string(original)
@@ -184,10 +184,10 @@ class TestV14RealWorldExamples:
     def test_fastapi_endpoint(self):
         """Test FastAPI-style endpoint documentation."""
         source = """# [M:UserAPI] [Role:Core]
-# F:get_user(user_id: i32) → User [GET/api/users/{user_id}] [Auth] [IO:Net:Async] [O(1)]
-# F:create_user(user: User) → User [POST/api/users] [Auth] [RateLimit:100] [IO:Net:Async] [O(1)]
-# F:update_user(user_id: i32, user: User) → User [PUT/api/users/{user_id}] [Auth] [IO:Net:Async] [O(1)]
-# F:delete_user(user_id: i32) → None [DELETE/api/users/{user_id}] [Auth] [IO:Net:Async] [O(1)]
+F:get_user(user_id: i32) → User [GET/api/users/{user_id}] [Auth] [IO:Net:Async] [O(1)]
+F:create_user(user: User) → User [POST/api/users] [Auth] [RateLimit:100] [IO:Net:Async] [O(1)]
+F:update_user(user_id: i32, user: User) → User [PUT/api/users/{user_id}] [Auth] [IO:Net:Async] [O(1)]
+F:delete_user(user_id: i32) → None [DELETE/api/users/{user_id}] [Auth] [IO:Net:Async] [O(1)]
 """
         ast = parse_string(source)
         assert len(ast.functions) == 4
@@ -208,10 +208,10 @@ class TestV14RealWorldExamples:
     def test_neural_network_model(self):
         """Test neural network model documentation."""
         source = """# [M:TransformerBlock]
-# F:__init__(config: Config) → None
-# F:forward(x: Tensor) → Tensor [NN:∇:Lin:MatMul:Thresh:Softmax:O(B*N²*D)]
-# F:attention(q: Tensor, k: Tensor, v: Tensor) → Tensor [NN:∇:Lin:MatMul:O(B*N²*D)]
-# F:feed_forward(x: Tensor) → Tensor [NN:∇:Lin:MatMul:O(B*N*D)]
+F:__init__(config: Config) → None
+F:forward(x: Tensor) → Tensor [NN:∇:Lin:MatMul:Thresh:Softmax:O(B*N²*D)]
+F:attention(q: Tensor, k: Tensor, v: Tensor) → Tensor [NN:∇:Lin:MatMul:O(B*N²*D)]
+F:feed_forward(x: Tensor) → Tensor [NN:∇:Lin:MatMul:O(B*N*D)]
 """
         ast = parse_string(source)
         assert len(ast.functions) == 4
@@ -252,11 +252,11 @@ class TestV14RealWorldExamples:
     def test_algorithm_complexity_documentation(self):
         """Test algorithm with various complexity levels."""
         source = """# [M:Algorithms]
-# F:linear_search(arr: List, target: i32) → i32 [Iter:Sequential:O(N)]
-# F:binary_search(arr: List, target: i32) → i32 [Iter:O(log N)]
-# F:bubble_sort(arr: List) → List [Iter:Nested:O(N²)]
-# F:quick_sort(arr: List) → List [Iter:Nested:O(N log N)]
-# F:matrix_multiply(a: Matrix, b: Matrix) → Matrix [Lin:MatMul:O(N³)]
+F:linear_search(arr: List, target: i32) → i32 [Iter:Sequential:O(N)]
+F:binary_search(arr: List, target: i32) → i32 [Iter:O(log N)]
+F:bubble_sort(arr: List) → List [Iter:Nested:O(N²)]
+F:quick_sort(arr: List) → List [Iter:Nested:O(N log N)]
+F:matrix_multiply(a: Matrix, b: Matrix) → Matrix [Lin:MatMul:O(N³)]
 """
         ast = parse_string(source)
         assert len(ast.functions) == 5
@@ -283,9 +283,9 @@ class TestV14BackwardCompatibility:
     def test_v13_operation_tags_still_work(self):
         """Test that v1.3 operation tags still parse and validate."""
         source = """# [M:Test]
-# F:old_style(x: i32) → i32 [Lin:MatMul]
-# F:io_operation() → None [IO:Disk:Block]
-# F:iteration(arr: List) → None [Iter:Hot]
+F:old_style(x: i32) → i32 [Lin:MatMul]
+F:io_operation() → None [IO:Disk:Block]
+F:iteration(arr: List) → None [Iter:Hot]
 """
         # Parse
         ast = parse_string(source)
@@ -311,8 +311,8 @@ class TestV14BackwardCompatibility:
     def test_mixed_v13_and_v14_tags(self):
         """Test mixing v1.3 and v1.4 tags in same file."""
         source = """# [M:MixedVersion]
-# F:old_function(x: i32) → i32 [Lin:MatMul]
-# F:new_function(x: i32) → i32 [Prop] [GET/api/data] [O(N)]
+F:old_function(x: i32) → i32 [Lin:MatMul]
+F:new_function(x: i32) → i32 [Prop] [GET/api/data] [O(N)]
 """
         # Parse
         ast = parse_string(source)
@@ -360,7 +360,7 @@ class TestV14ErrorHandling:
         from pyshort.core.parser import ParseError
 
         source = """# [M:Test]
-# F:bad_func() → None [
+F:bad_func() → None [
 """
         with pytest.raises(ParseError):
             parse_string(source)

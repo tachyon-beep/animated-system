@@ -4,6 +4,7 @@ This module enforces grammar constraints and semantic best practices
 according to RFC Section 3.8 and general design principles.
 """
 
+import re
 from abc import ABC, abstractmethod
 from typing import Iterator, List
 
