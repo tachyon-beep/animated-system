@@ -398,8 +398,8 @@ def main():
         api_key=api_key,
     )
 
-    # Initialize explorer (point to sample codebase)
-    codebase_path = Path(__file__).parent.parent / "sample_codebase" / "gpt" / "model.py"
+    # Initialize explorer (point to nanoGPT codebase)
+    codebase_path = Path(__file__).parent.parent / "test_repos" / "nanoGPT" / "model.py"
     explorer = CodebaseExplorer(codebase_path)
 
     # Run tests
