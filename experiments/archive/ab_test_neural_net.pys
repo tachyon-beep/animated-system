@@ -1,0 +1,25 @@
+# [M:Transformer attention mechanism] [Role:Core]
+
+[C:MultiHeadAttention]
+  d_model ∈ Unknown
+  num_heads ∈ Unknown
+  d_k ∈ Unknown
+  q_linear ∈ Linear
+  k_linear ∈ Linear
+  v_linear ∈ Linear
+  out_linear ∈ Linear
+  dropout ∈ Dropout
+  scale ∈ Unknown
+
+  # Methods:
+  # F:__init__(d_model: i32, num_heads: i32, dropout: f32) → Unknown
+  # F:forward(query: f32[N]@GPU, key: f32[N]@GPU, value: f32[N]@GPU, mask: Unknown?) → f32[N]@GPU [O(B*N²*D)]
+  # F:create_causal_mask(seq_len: i32, device: str) → f32[N]@GPU [Static] [O(N²)]
+  # F:parameter_count() → i32 [Prop] [O(1)]
+
+[C:PositionalEncoding]
+  d_model ∈ Unknown
+
+  # Methods:
+  # F:__init__(d_model: i32, max_len: i32) → Unknown
+  # F:forward(x: f32[N]@GPU) → f32[N]@GPU [O(B*N*D)]

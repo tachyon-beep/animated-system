@@ -4,9 +4,8 @@ Provides consistent, opinionated formatting for PyShorthand files.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
 
-from pyshort.core.ast_nodes import Class, Function, PyShortAST, StateVar, Statement
+from pyshort.core.ast_nodes import Class, Function, PyShortAST, Statement, StateVar
 from pyshort.core.parser import parse_file, parse_string
 from pyshort.core.symbols import to_ascii, to_unicode
 
@@ -27,7 +26,7 @@ class FormatConfig:
 class Formatter:
     """Formats PyShorthand code for consistency."""
 
-    def __init__(self, config: Optional[FormatConfig] = None):
+    def __init__(self, config: FormatConfig | None = None):
         """Initialize formatter.
 
         Args:
@@ -80,7 +79,7 @@ class Formatter:
 
         return result
 
-    def _format_metadata(self, ast: PyShortAST) -> List[str]:
+    def _format_metadata(self, ast: PyShortAST) -> list[str]:
         """Format metadata header."""
         lines = []
         meta = ast.metadata
@@ -125,17 +124,47 @@ class Formatter:
 
         return lines
 
-    def _format_class(self, cls: Class) -> List[str]:
-        """Format a class definition."""
+    def _format_class(self, cls: Class) -> list[str]:
+        """Format a class definition.
+
+        v1.5 supports:
+        - [P:Name] for protocols
+        - [C:List<T>] for generics
+        - [C:Foo] ◊ Base1, Base2 for inheritance
+        - [Abstract] and [Protocol] tags
+        """
         lines = []
 
-        # Class declaration
-        lines.append(f"[C:{cls.name}]")
+        # v1.5: Use P: prefix for protocols
+        prefix = "P" if cls.is_protocol else "C"
 
-        # Dependencies
+        # Class declaration with optional generic parameters
+        if cls.generic_params:
+            generic_str = ", ".join(cls.generic_params)
+            lines.append(f"[{prefix}:{cls.name}<{generic_str}>]")
+        else:
+            lines.append(f"[{prefix}:{cls.name}]")
+
+        # v1.5: Add [Abstract] or [Protocol] tags if present
+        tags = []
+        if cls.is_abstract:
+            tags.append("[Abstract]")
+        if cls.is_protocol and not prefix == "P":
+            # Only add [Protocol] tag if not already using P: prefix
+            tags.append("[Protocol]")
+        if tags:
+            lines[-1] += " " + " ".join(tags)
+
+        # v1.5: Inheritance (◊ Base1, Base2)
+        if cls.base_classes:
+            bases = ", ".join(cls.base_classes)
+            lines.append(f"  ◊ {bases}")
+            lines.append("")
+
+        # v1.4: Dependencies (kept separate from inheritance)
         if cls.dependencies:
             deps = ", ".join(f"[Ref:{dep.ref_id}]" for dep in cls.dependencies)
-            lines.append(f"  ◊ {deps}")
+            lines.append(f"  Dependencies: {deps}")
             lines.append("")
 
         # State variables (sorted and aligned)
@@ -151,7 +180,7 @@ class Formatter:
 
         return lines
 
-    def _format_state_variables(self, state_vars: List[StateVar]) -> List[str]:
+    def _format_state_variables(self, state_vars: list[StateVar]) -> list[str]:
         """Format state variables with alignment."""
         if not state_vars:
             return []
@@ -205,7 +234,38 @@ class Formatter:
 
         return line
 
-    def _format_function(self, func: Function, indent: int = 0) -> List[str]:
+    def _format_tags(self, tags: list) -> str:
+        """Format tags in v1.4 grouped order.
+
+        Order: [Decorators] [HTTP Routes] [Operations] [Complexity]
+
+        Args:
+            tags: List of Tag objects
+
+        Returns:
+            Formatted tag string
+        """
+        if not tags:
+            return ""
+
+        # Group tags by type
+        decorator_tags = [
+            str(t) for t in tags if hasattr(t, "tag_type") and t.tag_type == "decorator"
+        ]
+        route_tags = [str(t) for t in tags if hasattr(t, "tag_type") and t.tag_type == "http_route"]
+        operation_tags = [
+            str(t) for t in tags if hasattr(t, "tag_type") and t.tag_type == "operation"
+        ]
+        complexity_tags = [
+            str(t) for t in tags if hasattr(t, "tag_type") and t.tag_type == "complexity"
+        ]
+        custom_tags = [str(t) for t in tags if hasattr(t, "tag_type") and t.tag_type == "custom"]
+
+        # Combine in order
+        ordered = decorator_tags + route_tags + operation_tags + complexity_tags + custom_tags
+        return " ".join(ordered) if ordered else ""
+
+    def _format_function(self, func: Function, indent: int = 0) -> list[str]:
         """Format a function definition."""
         lines = []
         indent_str = " " * (self.config.indent * indent)
@@ -220,11 +280,17 @@ class Formatter:
         if func.return_type:
             sig += f" → {func.return_type}"
 
-        # Add modifiers/tags
-        if func.modifiers or func.tags:
-            tags = [f"[{m}]" for m in func.modifiers]
-            tags.extend(str(t) for t in func.tags)
-            sig += " " + " ".join(tags)
+        # Add modifiers/tags (v1.4: grouped by type)
+        tag_parts = []
+        if func.modifiers:
+            tag_parts.extend([f"[{m}]" for m in func.modifiers])
+        if func.tags:
+            formatted_tags = self._format_tags(func.tags)
+            if formatted_tags:
+                tag_parts.append(formatted_tags)
+
+        if tag_parts:
+            sig += " " + " ".join(tag_parts)
 
         lines.append(sig)
 
@@ -250,7 +316,7 @@ class Formatter:
 
         return lines
 
-    def _format_statements(self, statements: List[Statement]) -> List[str]:
+    def _format_statements(self, statements: list[Statement]) -> list[str]:
         """Format a list of statements."""
         return [
             self._format_statement(stmt, 0)
@@ -288,25 +354,31 @@ class Formatter:
             return f"{indent_str}{prefix}⊳ {stmt.rhs}"
 
         if stmt.statement_type == "conditional":
-            tags_str = "".join(str(t) for t in stmt.tags)
+            tags_str = self._format_tags(stmt.tags)
             if stmt.condition:
-                return f"{indent_str}{prefix}?{stmt.condition} →{tags_str}"
+                return (
+                    f"{indent_str}{prefix}?{stmt.condition} → {tags_str}"
+                    if tags_str
+                    else f"{indent_str}{prefix}?{stmt.condition}"
+                )
             return f"{indent_str}{prefix}?"
 
         if stmt.lhs and stmt.operator and stmt.rhs:
-            # Assignment or mutation
-            tags_str = "".join(f" →{t}" for t in stmt.tags)
-            return f"{indent_str}{prefix}{stmt.lhs} {stmt.operator} {stmt.rhs}{tags_str}"
+            # Assignment or mutation (v1.4: grouped tags)
+            tags_str = self._format_tags(stmt.tags)
+            tag_suffix = f" → {tags_str}" if tags_str else ""
+            return f"{indent_str}{prefix}{stmt.lhs} {stmt.operator} {stmt.rhs}{tag_suffix}"
 
         if stmt.operator == "!!" and stmt.rhs:
-            # System mutation
-            tags_str = "".join(f" →{t}" for t in stmt.tags)
-            return f"{indent_str}{prefix}!!{stmt.rhs}{tags_str}"
+            # System mutation (v1.4: grouped tags)
+            tags_str = self._format_tags(stmt.tags)
+            tag_suffix = f" → {tags_str}" if tags_str else ""
+            return f"{indent_str}{prefix}!!{stmt.rhs}{tag_suffix}"
 
         return ""
 
 
-def format_string(source: str, config: Optional[FormatConfig] = None) -> str:
+def format_string(source: str, config: FormatConfig | None = None) -> str:
     """Format PyShorthand source code.
 
     Args:
@@ -322,7 +394,7 @@ def format_string(source: str, config: Optional[FormatConfig] = None) -> str:
 
 
 def format_file(
-    file_path: str, config: Optional[FormatConfig] = None, in_place: bool = False
+    file_path: str, config: FormatConfig | None = None, in_place: bool = False
 ) -> str:
     """Format a PyShorthand file.
 

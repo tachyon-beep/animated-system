@@ -1,0 +1,11 @@
+# [M:Common sorting and searching algorithms] [Role:Util]
+
+# Module-level functions
+F:binary_search(arr: list, target: i32) → i32 [Iter] [O(log N)]
+F:quick_sort(arr: list) → list [O(N log N)]
+F:merge_sort(arr: list) → list [O(N log N)]
+F:merge(left: list, right: list) → list [Iter] [O(N)]
+F:bubble_sort(arr: list) → list [Iter:Nested] [O(N²)]
+F:fibonacci(n: i32) → i32 [Cached:TTL:1000] [O(N)]
+F:matrix_multiply(a: list, b: list) → list [Iter:Nested] [O(N³)]
+F:find_kth_largest(arr: list, k: i32) → i32 [Iter] [O(N)]
