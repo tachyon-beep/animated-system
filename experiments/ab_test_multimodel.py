@@ -19,6 +19,10 @@ from typing import List, Dict, Any
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import sys
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv(Path(__file__).parent.parent / '.env')
 
 # Import from the main framework
 sys.path.insert(0, str(Path(__file__).parent))
