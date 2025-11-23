@@ -1,0 +1,27 @@
+# [M:FastAPI user management API] [Role:Api]
+
+[C:User] # Pydantic
+  ◊ [Ref:Pydantic]
+  id ∈ i32
+  name ∈ str
+  email ∈ str
+  active ∈ bool  # default: True
+
+[C:UserAPI]
+  app ∈ Unknown
+  users ∈ dict
+  next_id ∈ i32
+
+  # Methods:
+  # F:__init__(app) → Unknown
+  # F:user_count() → i32 [Prop] [O(1)]
+  # F:validate_email(email: str) → bool [Static] [O(1)]
+  # F:get_user_by_email(email: str) → [Ref:User]? [Cached:TTL:100] [Iter] [O(N)]
+
+# Module-level functions
+F:get_user(user_id: i32) → [Ref:User]? [O(1)]
+F:create_user(name: str, email: str) → [Ref:User] [O(1)]
+F:update_user(user_id: i32, name: str?, email: str?) → [Ref:User]? [O(1)]
+F:delete_user(user_id: i32) → bool [O(1)]
+F:search_users(query: str) → list [Iter] [O(N)]
+F:next_id() → i32
