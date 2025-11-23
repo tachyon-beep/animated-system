@@ -103,13 +103,18 @@ class Metadata:
 
 @dataclass(frozen=True)
 class TypeSpec:
-    """Type specification with optional shape and location."""
+    """Type specification with optional shape and location.
+
+    v1.5: Added generic_params for generic types like List<T>, Dict<K,V>
+    """
 
     base_type: str  # f32, i64, bool, obj, Map, Str, Any
     shape: Optional[List[str]] = None  # [N, C, H, W]
     location: Optional[str] = None  # @CPU, @GPU, @Disk, @Net
     transfer: Optional[Tuple[str, str]] = None  # @CPU→GPU
     union_types: Optional[List[str]] = None  # For Union types: [i32, str, f32]
+    generic_params: Optional[List[str]] = None  # v1.5: For generics: List<T>, Dict<K, V>
+    nested_structure: Optional[Dict[str, str]] = None  # v1.5: For {} expansion
 
     def __str__(self) -> str:
         """Format as PyShorthand notation."""
@@ -119,12 +124,24 @@ class TypeSpec:
         else:
             result = self.base_type
 
+        # Add generics (v1.5)
+        if self.generic_params:
+            result += f"<{', '.join(self.generic_params)}>"
+
         if self.shape:
             result += f"[{', '.join(self.shape)}]"
         if self.transfer:
             result += f"@{self.transfer[0]}→{self.transfer[1]}"
         elif self.location:
             result += f"@{self.location}"
+
+        # Add nested structure (v1.5)
+        if self.nested_structure:
+            result += " {"
+            for key, val in self.nested_structure.items():
+                result += f"\n  {key}: {val}"
+            result += "\n}"
+
         return result
 
 
@@ -580,7 +597,14 @@ class Reference(Entity):
 
 @dataclass(frozen=True)
 class Class(Entity):
-    """Class definition with state and methods."""
+    """Class definition with state and methods.
+
+    v1.5 enhancements:
+    - base_classes: Inheritance support (◊ notation)
+    - generic_params: Generic type parameters (<T>)
+    - is_abstract: Abstract class marker
+    - is_protocol: Protocol/interface marker
+    """
 
     name: str
     state: List[StateVar] = field(default_factory=list)
@@ -588,6 +612,11 @@ class Class(Entity):
     dependencies: List[Reference] = field(default_factory=list)
     line: int = 0
     metadata: Optional[Metadata] = None
+    # v1.5: Inheritance and generics
+    base_classes: List[str] = field(default_factory=list)  # [C:Foo] ◊ Bar, Baz
+    generic_params: List[str] = field(default_factory=list)  # [C:List<T>]
+    is_abstract: bool = False  # [C:Foo] [Abstract]
+    is_protocol: bool = False  # [P:Drawable] [Protocol]
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -598,6 +627,10 @@ class Class(Entity):
             "dependencies": [d.to_dict() for d in self.dependencies],
             "line": self.line,
             "metadata": self.metadata.to_dict() if self.metadata else None,
+            "base_classes": self.base_classes,
+            "generic_params": self.generic_params,
+            "is_abstract": self.is_abstract,
+            "is_protocol": self.is_protocol,
         }
 
 
@@ -628,6 +661,41 @@ class Interface(Entity):
 
     def to_dict(self) -> Dict[str, Any]:
         return {"type": "interface", "name": self.name, "methods": self.methods, "line": self.line}
+
+
+@dataclass(frozen=True)
+class Protocol(Entity):
+    """Protocol definition (v1.5).
+
+    Represents typing.Protocol - structural subtyping interface.
+    """
+
+    name: str
+    methods: List[Function] = field(default_factory=list)
+    line: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": "protocol",
+            "name": self.name,
+            "methods": [m.to_dict() for m in self.methods],
+            "line": self.line,
+        }
+
+
+@dataclass(frozen=True)
+class Enum(Entity):
+    """Enum definition (v1.5).
+
+    Represents Python Enum with named constants.
+    """
+
+    name: str
+    values: Dict[str, Union[int, str]] = field(default_factory=dict)  # {RED: 1, GREEN: 2}
+    line: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"type": "enum", "name": self.name, "values": self.values, "line": self.line}
 
 
 @dataclass(frozen=True)
