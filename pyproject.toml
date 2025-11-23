@@ -56,7 +56,6 @@ pyshort-parse = "pyshort.cli.parse:main"
 pyshort-lint = "pyshort.cli.lint:main"
 pyshort-fmt = "pyshort.cli.format:main"
 py2short = "pyshort.cli.decompile:main"
-pyshort-complexity = "pyshort.cli.complexity:main"
 pyshort-viz = "pyshort.cli.viz:main"
 pyshort = "pyshort.cli.main:main"
 

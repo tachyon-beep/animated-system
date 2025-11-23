@@ -1158,3 +1158,7 @@ def decompile_file(
             raise RuntimeError(f"Cannot write output file '{output_path}': {e}")
 
     return result
+
+
+# Backwards compatibility alias
+PyShortDecompiler = PyShorthandGenerator
