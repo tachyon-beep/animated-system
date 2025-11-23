@@ -506,6 +506,50 @@ class ErrorSurfaceDocumentationRule(Rule):
                 )
 
 
+class GenericParametersValidityRule(Rule):
+    """Validate generic parameter naming (v1.5)."""
+
+    def check(self, ast: PyShortAST) -> Iterator[Diagnostic]:
+        """Check generic parameters follow conventions."""
+        from pyshort.core.ast_nodes import Class
+
+        for entity in ast.entities:
+            if isinstance(entity, Class) and entity.generic_params:
+                for param in entity.generic_params:
+                    # Generic params should be uppercase single letters or TitleCase
+                    if not (len(param) == 1 and param.isupper()) and not param[0].isupper():
+                        yield Diagnostic(
+                            severity=DiagnosticSeverity.WARNING,
+                            line=entity.line,
+                            column=1,
+                            message=f"Generic parameter '{param}' should be uppercase (T, U, K, V) or TitleCase (TValue)",
+                            suggestion=f"Rename to '{param.upper()[0]}' or '{param.title()}'",
+                            code="W010",
+                        )
+
+
+class InheritanceValidityRule(Rule):
+    """Validate inheritance declarations (v1.5)."""
+
+    def check(self, ast: PyShortAST) -> Iterator[Diagnostic]:
+        """Check base classes are valid."""
+        from pyshort.core.ast_nodes import Class
+
+        for entity in ast.entities:
+            if isinstance(entity, Class) and entity.base_classes:
+                for base in entity.base_classes:
+                    # Allow common base classes and dotted names (nn.Module, etc.)
+                    if not base[0].isupper() and "." not in base:
+                        yield Diagnostic(
+                            severity=DiagnosticSeverity.WARNING,
+                            line=entity.line,
+                            column=1,
+                            message=f"Base class '{base}' should start with uppercase letter",
+                            suggestion=f"Check if '{base.title()}' is correct",
+                            code="W011",
+                        )
+
+
 class Linter:
     """Main linter for PyShorthand files."""
 
@@ -524,6 +568,8 @@ class Linter:
             ComplexityTagValidator(),  # v1.4
             DecoratorTagValidator(),  # v1.4
             HTTPRouteValidator(),  # v1.4
+            GenericParametersValidityRule(),  # v1.5
+            InheritanceValidityRule(),  # v1.5
             SystemMutationSafetyRule(),
             CriticalOperationTaggingRule(),
             LocationInferenceRule(),
