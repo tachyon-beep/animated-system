@@ -10,7 +10,7 @@ try:
     from ..analyzer.context_pack import ContextPackGenerator, ContextPack
     from ..analyzer.execution_flow import ExecutionFlowTracer, ExecutionFlow
     from ..decompiler.py2short import PyShorthandGenerator
-    from ..core.parser import parse as parse_pyshorthand
+    from ..core.parser import parse_string as parse_pyshorthand
     _ADVANCED_TOOLS_AVAILABLE = True
 except ImportError:
     _ADVANCED_TOOLS_AVAILABLE = False
