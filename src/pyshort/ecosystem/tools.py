@@ -680,11 +680,39 @@ class CodebaseExplorer:
         func_name = ast.unparse(call_node.func)
         return class_name in func_name
 
-    def _find_parent_context(self, tree: ast.Module, _target_node: ast.AST) -> str | None:
-        """Find the class.method context containing a node."""
-        # Walk tree to find parent
-        # This is simplified - would need proper parent tracking
-        return None  # TODO: Implement proper parent tracking
+    def _find_parent_context(self, tree: ast.Module, target_node: ast.AST) -> str | None:
+        """Find the class.method context containing a node.
+
+        Args:
+            tree: The parsed AST module
+            target_node: The node to find the parent context for
+
+        Returns:
+            String like "ClassName.method_name" or None if top-level
+        """
+        # Build parent map by walking the tree
+        parent_map: dict[ast.AST, ast.AST] = {}
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parent_map[child] = node
+
+        # Walk up from target to find containing class/method
+        current = target_node
+        method_name = None
+        class_name = None
+
+        while current in parent_map:
+            parent = parent_map[current]
+            if isinstance(parent, ast.FunctionDef) and method_name is None:
+                method_name = parent.name
+            elif isinstance(parent, ast.ClassDef) and class_name is None:
+                class_name = parent.name
+                break  # Found both, stop
+            current = parent
+
+        if class_name and method_name:
+            return f"{class_name}.{method_name}"
+        return None
 
 
 # Explicit references to public API to keep static analysis tools from flagging them as unused.
