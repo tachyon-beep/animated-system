@@ -160,7 +160,7 @@ class Tag:
 
     base: str  # Tag base (Lin, Prop, GET, O(N), etc.)
     qualifiers: list[str] = field(default_factory=list)  # O(N), Async, Hot, etc.
-    tag_type: Literal[operation, complexity, decorator, http_route, custom] = (
+    tag_type: Literal["operation", "complexity", "decorator", "http_route", "custom"] = (
         "operation"
     )
     http_method: str | None = None  # For HTTP route tags (GET, POST, etc.)
@@ -282,6 +282,10 @@ class Identifier(Expression):
         return self.name
 
 
+@dataclass(frozen=True)
+class Literal(Expression):
+    """Literal value (number, string, bool)."""
+
     value: int | float | str | bool
     type_hint: str | None = None
 
@@ -331,20 +335,6 @@ class FunctionCall(Expression):
     def __str__(self) -> str:
         args_str = ", ".join(str(arg) for arg in self.args)
         return f"{self.function}({args_str})"
-
-
-    operation: str  # "matmul", "broadcast", "conv", etc.
-    operands: list[Expression]
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "type": "tensor_op",
-            "operation": self.operation,
-            "operands": [op.to_dict() for op in self.operands],
-        }
-
-    def __str__(self) -> str:
-        return f"⊗({', '.join(str(op) for op in self.operands)})"
 
 
 @dataclass(frozen=True)
